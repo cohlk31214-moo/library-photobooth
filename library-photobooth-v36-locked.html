@@ -677,26 +677,16 @@ BACKGROUNDS.forEach((bg, i) => {
         thumbs[idx].click();
 
         // 隱藏背景選單
-        var screen1 = document.getElementById('screen1');
-        if (screen1) {
-          screen1.style.display = 'none';
-        }
+        document.getElementById('screen1').style.display = 'none';
 
         // 直接進拍照頁
-        if (typeof showScreen === 'function') {
-          showScreen(2);
-        }
+        showScreen(2);
 
         // 啟動相機
-        if (typeof initCamera === 'function') {
-          await initCamera();
-        }
+        await initCamera();
 
-        // 隱藏返回按鈕
-        var backBtn = document.getElementById('backBtn');
-        if (backBtn) {
-          backBtn.style.display = 'none';
-        }
+        // 隱藏「換背景」按鈕
+        document.getElementById('backBtn').style.display = 'none';
       }
 
     }, 300);
