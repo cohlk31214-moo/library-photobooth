@@ -1,0 +1,2355 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>海底圖書館 — 捕魚分類遊戲</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Righteous&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --deep: #03192e;
+    --ocean1: #0a3d62;
+    --ocean2: #0c6291;
+    --ocean3: #1a8fbf;
+    --foam: #a8e6f0;
+    --gold: #f5c518;
+    --coral: #ff6b6b;
+    --green: #4ecdc4;
+    --sand: #ffeaa7;
+    --white: #f0faff;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Noto Sans TC', sans-serif;
+    background: var(--deep);
+    min-height: 100vh;
+    overflow: hidden;
+    user-select: none;
+    cursor: none;
+  }
+
+
+
+  /* ── CURSORS ── */
+  #cursor {
+    position: fixed;
+    pointer-events: none;
+    z-index: 9999;
+    filter: drop-shadow(0 2px 8px rgba(0,0,0,.8));
+    transition: none;
+  }
+
+  #cursor.sub   #cursor-diver { display: none !important; }
+  #cursor.diver #cursor-sub   { display: none !important; }
+  #cursor.sub   #cursor-sub   { display: inline !important; }
+  #cursor.diver #cursor-diver { display: inline !important; }
+  #cursor.sub   { transform: translate(-4px, -20px); }
+  #cursor.sub #cursor-sub { transform-origin: left center; }
+  #cursor.diver { transform: translate(-20px, -28px); }
+  #cursor.sub.clicking   { transform: translate(-4px,-20px) scale(.88) rotate(6deg); }
+  #cursor.diver.clicking { transform: translate(-20px,-28px) scale(.9); }
+
+  /* ── GOGGLE ZOOM TRANSITION ── */
+  #goggle-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    display: none;
+    align-items: center; justify-content: center;
+    background: black;
+    pointer-events: none;
+  }
+  #goggle-overlay.active { display: flex; }
+  .goggle-frame {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .goggle-svg {
+    width: 100vw; height: 100vh;
+    animation: goggleZoom 1.8s cubic-bezier(.4,0,.2,1) forwards;
+  }
+  @keyframes goggleZoom {
+    0%   { transform: scale(.12); opacity: 0; }
+    20%  { opacity: 1; }
+    55%  { transform: scale(1); opacity: 1; }
+    80%  { transform: scale(1); opacity: 1; }
+    100% { transform: scale(18); opacity: 0; }
+  }
+
+  /* ── OCEAN FADE IN ── */
+  #ocean-reveal {
+    position: fixed; inset: 0; z-index: 1500;
+    background: black;
+    pointer-events: none;
+    opacity: 0;
+    visibility: hidden;
+  }
+  #ocean-reveal.fade { animation: oceanReveal 1.4s ease forwards; }
+  @keyframes oceanReveal {
+    0%   { opacity: 1; }
+    100% { opacity: 0; visibility: hidden; }
+  }
+
+
+  /* ── TREASURE CHEST ── */
+  .chest {
+    position: absolute;
+    cursor: none;
+    z-index: 10;
+    filter: drop-shadow(0 6px 16px rgba(0,0,0,.6));
+    animation: chestBob 3s ease-in-out infinite alternate;
+  }
+  .chest:hover {
+    filter: drop-shadow(0 8px 28px rgba(245,197,24,.6));
+    animation: chestBobHover 3s ease-in-out infinite alternate;
+  }
+  @keyframes chestBob { from{transform:translateY(0)} to{transform:translateY(-7px)} }
+  @keyframes chestBobHover { from{transform:translateY(0) scale(1.1)} to{transform:translateY(-7px) scale(1.1)} }
+  .chest.opening { animation: chestOpen .5s ease forwards !important; pointer-events: none; }
+  @keyframes chestOpen {
+    0%  { transform: scale(1); opacity:1; }
+    35% { transform: scale(1.3) rotate(-8deg); opacity:1; }
+    65% { transform: scale(1.1) rotate(4deg); opacity:.7; }
+    100%{ transform: scale(0) translateY(-80px); opacity:0; }
+  }
+  .chest-reward {
+    position: fixed; z-index: 500; pointer-events: none;
+    text-align: center; animation: rewardPop 1.8s ease forwards;
+  }
+  @keyframes rewardPop {
+    0%  { opacity:1; transform:translateY(0) scale(.8); }
+    25% { opacity:1; transform:translateY(-30px) scale(1.3); }
+    70% { opacity:1; transform:translateY(-80px) scale(1); }
+    100%{ opacity:0; transform:translateY(-130px) scale(.8); }
+  }
+  .chest-reward .r-icon { font-size:2.4rem; display:block; }
+  .chest-reward .r-text {
+    font-size:.88rem; font-weight:900;
+    color:var(--gold); display:block;
+    text-shadow:0 2px 8px rgba(0,0,0,.9);
+    white-space:nowrap;
+  }
+
+  /* ── OCEAN BACKGROUND ── */
+  #ocean {
+    position: fixed; inset: 0;
+    background: linear-gradient(180deg,
+      #011627 0%, #03192e 20%, #0a3d62 55%, #0c6291 80%, #1565a8 100%);
+    overflow: hidden;
+  }
+
+  /* bubbles */
+  .bubble {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(168,230,240,0.15);
+    border: 1px solid rgba(168,230,240,0.3);
+    animation: rise linear infinite;
+    pointer-events: none;
+  }
+  @keyframes rise {
+    0%   { transform: translateY(0) scale(1); opacity: .6; }
+    100% { transform: translateY(-110vh) scale(1.3); opacity: 0; }
+  }
+
+  /* light rays */
+  .ray {
+    position: absolute; top: -10%;
+    width: 60px; height: 70vh;
+    background: linear-gradient(180deg, rgba(168,230,240,.12) 0%, transparent 100%);
+    transform-origin: top center;
+    animation: sway 8s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  @keyframes sway { from { transform: rotate(-6deg); } to { transform: rotate(6deg); } }
+
+  /* seaweed */
+  /* seaweed types */
+  .weed {
+    position: absolute; bottom: 0;
+    transform-origin: bottom center;
+    pointer-events: none;
+  }
+  @keyframes weedSway {
+    0%   { transform: rotate(-8deg) scaleX(1); }
+    30%  { transform: rotate(10deg) scaleX(0.95); }
+    60%  { transform: rotate(-6deg) scaleX(1.02); }
+    100% { transform: rotate(8deg)  scaleX(0.97); }
+  }
+  @keyframes weedSway2 {
+    0%   { transform: rotate(6deg)  scaleX(0.98); }
+    35%  { transform: rotate(-10deg) scaleX(1.03); }
+    65%  { transform: rotate(8deg)  scaleX(0.96); }
+    100% { transform: rotate(-7deg) scaleX(1); }
+  }
+
+  /* sand floor */
+  #floor {
+    position: fixed; bottom: 0; left: 0; right: 0;
+    height: 110px;
+    background: linear-gradient(180deg, #1a6b3e 0%, #c8a96e 30%, #e0c07a 100%);
+    border-radius: 60% 60% 0 0 / 20px 20px 0 0;
+    z-index: 5;
+  }
+
+  /* ── HUD ── */
+  #hud {
+    position: fixed; top: 0; left: 0; right: 0;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px;
+    background: linear-gradient(180deg, rgba(1,22,39,.9) 0%, transparent 100%);
+    z-index: 100;
+    gap: 12px;
+  }
+  #hud .title {
+    font-family: 'Righteous', cursive;
+    font-size: 1.3rem;
+    color: var(--foam);
+    text-shadow: 0 0 20px rgba(168,230,240,.8);
+    white-space: nowrap;
+  }
+  .stat-box {
+    background: rgba(10,61,98,.7);
+    border: 1px solid rgba(168,230,240,.3);
+    border-radius: 12px;
+    padding: 6px 16px;
+    color: var(--foam);
+    font-size: .85rem;
+    text-align: center;
+    backdrop-filter: blur(6px);
+  }
+  .stat-box span { display: block; font-size: 1.2rem; font-weight: 900; color: var(--gold); }
+
+  /* category legend */
+  #legend {
+    position: fixed; right: 16px; top: 70px;
+    display: flex; flex-direction: column; gap: 6px;
+    z-index: 100;
+  }
+  .cat-badge {
+    display: flex; align-items: center; gap: 8px;
+    background: rgba(1,22,39,.75);
+    border-radius: 20px;
+    padding: 5px 12px 5px 8px;
+    font-size: .78rem;
+    color: var(--white);
+    border: 1.5px solid rgba(255,255,255,.15);
+    backdrop-filter: blur(6px);
+    cursor: default;
+  }
+  .cat-badge .dot { width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ── FISH ── */
+  .fish {
+    position: absolute;
+    cursor: pointer;
+    transition: transform .15s;
+    z-index: 20;
+    filter: drop-shadow(0 4px 12px rgba(0,0,0,.5));
+  }
+  @keyframes fishBob {
+    0%,100% { margin-top: 0px; }
+    50%      { margin-top: -18px; }
+  }
+  .fish:hover { transform: scale(1.18); filter: drop-shadow(0 4px 20px rgba(255,255,255,.5)); }
+  .fish.caught { animation: catchAnim .4s ease forwards; pointer-events: none; }
+  @keyframes catchAnim {
+    0%   { transform: scale(1); }
+    50%  { transform: scale(1.4) rotate(20deg); }
+    100% { transform: scale(0) translateY(-80px); opacity: 0; }
+  }
+
+  .fish-label {
+    position: absolute;
+    bottom: -22px; left: 50%;
+    transform: translateX(-50%);
+    background: rgba(1,22,39,.85);
+    color: var(--foam);
+    font-size: .72rem;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+    pointer-events: none;
+    border: 1px solid rgba(168,230,240,.3);
+  }
+
+  /* ── FISHING NET (drag zone) ── */
+  #net-area {
+    position: fixed;
+    left: 16px; bottom: 90px;
+    width: 340px;
+    z-index: 50;
+  }
+  #net-area h3 {
+    color: var(--foam); font-size: .85rem; margin-bottom: 8px;
+    text-shadow: 0 1px 6px rgba(0,0,0,.8);
+  }
+
+  .bucket-row {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+
+  .bucket {
+    flex: 1; min-width: 72px;
+    background: rgba(10,61,98,.6);
+    border: 2px dashed rgba(168,230,240,.4);
+    border-radius: 14px;
+    padding: 8px 6px;
+    text-align: center;
+    transition: border-color .2s, background .2s;
+    cursor: default;
+    min-height: 80px;
+  }
+  .bucket.drag-over {
+    border-color: var(--gold);
+    background: rgba(245,197,24,.15);
+  }
+  .bucket .b-icon { font-size: 1.6rem; }
+  .bucket .b-label { font-size: .7rem; color: var(--foam); margin-top: 2px; line-height: 1.2; }
+  .bucket .b-count {
+    font-size: .75rem; color: var(--gold); font-weight: 700;
+    margin-top: 4px;
+  }
+
+  /* ── QUESTION CARD ── */
+  #question-card {
+    position: fixed;
+    top: 70px; left: 50%; transform: translateX(-50%);
+    background: rgba(3,25,46,.9);
+    border: 1.5px solid rgba(168,230,240,.35);
+    border-radius: 20px;
+    padding: 14px 22px;
+    max-width: 380px;
+    width: 90%;
+    z-index: 200;
+    color: var(--white);
+    text-align: center;
+    backdrop-filter: blur(10px);
+    box-shadow: 0 8px 40px rgba(0,0,0,.6);
+    display: none;
+  }
+  #question-card h2 { font-size: 1rem; margin-bottom: 10px; color: var(--foam); }
+  #question-card .book-name {
+    font-size: 1.15rem; font-weight: 900; color: var(--gold);
+    margin-bottom: 14px;
+  }
+  #question-card .opts {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .opt-btn {
+    background: rgba(10,61,98,.8);
+    border: 1.5px solid rgba(168,230,240,.3);
+    border-radius: 12px;
+    color: var(--white);
+    font-family: 'Noto Sans TC', sans-serif;
+    font-size: .82rem;
+    padding: 10px 8px;
+    cursor: pointer;
+    transition: all .2s;
+    display: flex; align-items: center; gap: 6px; justify-content: center;
+  }
+  .opt-btn:hover { border-color: var(--gold); background: rgba(245,197,24,.2); }
+  .opt-btn.correct { border-color: var(--green); background: rgba(78,205,196,.3); animation: pulse .4s; }
+  .opt-btn.wrong   { border-color: var(--coral); background: rgba(255,107,107,.3); animation: shake .4s; }
+  @keyframes pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.06)} }
+  @keyframes shake { 0%,100%{transform:translateX(0)} 25%{transform:translateX(-6px)} 75%{transform:translateX(6px)} }
+
+  /* ── FEEDBACK TOAST ── */
+  #toast {
+    position: fixed; top: 50%; left: 50%;
+    transform: translate(-50%,-50%) scale(.8);
+    background: rgba(3,25,46,.95);
+    border-radius: 20px;
+    padding: 20px 34px;
+    text-align: center;
+    z-index: 300;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    border: 2px solid var(--foam);
+  }
+  #toast.show { opacity: 1; transform: translate(-50%,-50%) scale(1); pointer-events: auto; }
+  #toast .t-icon { font-size: 2.8rem; }
+  #toast .t-msg  { font-size: 1rem; color: var(--white); margin-top: 8px; }
+  #toast .t-hint { font-size: .8rem; color: var(--foam); margin-top: 4px; opacity: .8; }
+
+  /* ── GAME OVER ── */
+  #gameover {
+    position: fixed; inset: 0;
+    background: rgba(1,22,39,.92);
+    display: none; align-items: center; justify-content: center;
+    z-index: 500;
+    flex-direction: column;
+    gap: 16px;
+    backdrop-filter: blur(8px);
+  }
+  #gameover h1 { font-family:'Righteous',cursive; font-size:2.5rem; color:var(--gold); text-align:center; }
+  #gameover p  { color: var(--foam); font-size:1rem; text-align:center; }
+  #gameover button {
+    background: var(--ocean2); color: var(--white);
+    border: 2px solid var(--foam); border-radius: 30px;
+    padding: 12px 36px; font-size: 1rem; cursor: pointer;
+    font-family: 'Noto Sans TC', sans-serif;
+    transition: background .2s;
+  }
+  #gameover button:hover { background: var(--ocean3); }
+
+  /* ── PROGRESS BAR ── */
+  #prog-wrap {
+    position: fixed; bottom: 86px; left: 50%; transform: translateX(-50%);
+    width: 200px; z-index: 100;
+  }
+  #prog-bar {
+    height: 6px; border-radius: 6px;
+    background: rgba(168,230,240,.2);
+    overflow: hidden;
+  }
+  #prog-fill {
+    height: 100%; background: var(--gold);
+    border-radius: 6px;
+    transition: width .4s;
+    width: 0%;
+  }
+  #prog-label { text-align:center; font-size:.72rem; color:var(--foam); margin-top:3px; opacity:.8; }
+
+  /* ── INTRO SCREEN ── */
+  #intro {
+    position: fixed; inset: 0; z-index: 1000;
+    overflow: hidden;
+    display: flex; align-items: center; justify-content: center;
+  }
+  #intro.hide {
+    animation: introFadeOut .6s ease forwards;
+    pointer-events: none;
+  }
+  @keyframes introFadeOut { to { opacity: 0; visibility: hidden; } }
+
+  /* ── INTRO OCEAN BACKGROUND ── */
+  #intro-ocean {
+    position: absolute; inset: 0;
+    background: linear-gradient(180deg,
+      #b8eaf7 0%, #7dd4ef 10%,
+      #4ab8e0 25%, #2196c8 45%,
+      #1565a0 65%, #0e4a80 82%, #0a3562 100%);
+  }
+
+  /* sun rays from surface */
+  .i-ray {
+    position: absolute; top: 0;
+    width: 80px; height: 65%;
+    background: linear-gradient(180deg, rgba(255,255,255,.22) 0%, transparent 100%);
+    transform-origin: top center;
+    animation: iRaySway 6s ease-in-out infinite alternate;
+    pointer-events: none;
+  }
+  @keyframes iRaySway { from{transform:rotate(-5deg)} to{transform:rotate(5deg)} }
+
+  /* water surface shimmer */
+  #intro-surface {
+    position: absolute; top: 0; left: 0; right: 0;
+    height: 80px;
+    background: linear-gradient(180deg, #87ceeb 0%, rgba(135,206,235,.0) 100%);
+    overflow: hidden;
+  }
+  .wave-line {
+    position: absolute; left: -100%; width: 300%;
+    height: 14px; border-radius: 50%;
+    background: rgba(255,255,255,.35);
+    animation: waveMov linear infinite;
+  }
+  @keyframes waveMov { from{transform:translateX(0)} to{transform:translateX(33.3%)} }
+
+  /* ── SHIP ON SURFACE ── */
+  #intro-ship {
+    position: absolute; top: 14px; left: -220px;
+    animation: shipSail 38s linear infinite;
+    pointer-events: none;
+    z-index: 12;
+  }
+  @keyframes shipSail {
+    from { transform: translateX(0); }
+    to   { transform: translateX(calc(100vw + 260px)); }
+  }
+
+  /* rocks / coral floor */
+  #intro-floor {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    height: 200px;
+    background: linear-gradient(180deg, transparent 0%, #1a4a2a 25%, #2a6a30 55%, #d4b87a 100%);
+    border-radius: 30% 40% 0 0 / 20px 25px 0 0;
+    overflow: visible;
+  }
+
+  /* coral decorations */
+  .i-coral {
+    position: absolute; bottom: 0;
+    animation: coralSway 4s ease-in-out infinite alternate;
+    transform-origin: bottom center;
+  }
+  @keyframes coralSway { from{transform:rotate(-8deg)} to{transform:rotate(8deg)} }
+
+  /* fish swimming in intro */
+  .i-fish {
+    position: absolute;
+    animation: fishSwim linear infinite;
+    pointer-events: none;
+    opacity: .85;
+  }
+  /* fish going LEFT→RIGHT: translateX only, wrapper has scaleX(-1) to face right */
+  @keyframes fishSwimR {
+    from { transform: translateX(-90px); }
+    to   { transform: translateX(calc(100vw + 90px)); }
+  }
+  /* fish going RIGHT→LEFT: start off right, travel to left, no flip needed */
+  @keyframes fishSwimL {
+    from { transform: translateX(calc(100vw + 90px)); }
+    to   { transform: translateX(-90px); }
+  }
+
+  /* bubbles */
+  .i-bubble {
+    position: absolute;
+    border-radius: 50%;
+    background: rgba(255,255,255,.25);
+    border: 1px solid rgba(255,255,255,.4);
+    animation: iBubble linear infinite;
+    pointer-events: none;
+  }
+  @keyframes iBubble {
+    from { transform: translateY(0); opacity: .7; }
+    to   { transform: translateY(-55vh); opacity: 0; }
+  }
+
+  /* ── INTRO PANEL ── */
+  #intro-panel {
+    position: relative; z-index: 20;
+    background: rgba(2, 18, 38, 0.82);
+    border: 2px solid rgba(168,230,240,.4);
+    border-radius: 22px;
+    padding: 28px 36px 24px;
+    max-width: 510px; width: 88%;
+    text-align: center;
+    backdrop-filter: blur(14px);
+    box-shadow: 0 0 60px rgba(0,0,0,.7), 0 0 0 1px rgba(168,230,240,.1);
+    animation: panelIn .9s .2s cubic-bezier(.17,.67,.35,1.25) both;
+  }
+  @keyframes panelIn {
+    from { transform: scale(.75) translateY(24px); opacity: 0; }
+    to   { transform: scale(1) translateY(0); opacity: 1; }
+  }
+  #intro-panel h1 {
+    font-family: 'Righteous', cursive;
+    font-size: 1.9rem; color: var(--gold);
+    text-shadow: 0 0 28px rgba(245,197,24,.85);
+    margin-bottom: 4px;
+  }
+  #intro-panel .subtitle {
+    font-size: .83rem; color: var(--foam); opacity: .85; margin-bottom: 18px;
+  }
+  .rules-grid {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 9px; margin-bottom: 16px;
+  }
+  .rule-card {
+    background: rgba(10,61,98,.55);
+    border: 1px solid rgba(168,230,240,.2);
+    border-radius: 14px; padding: 11px 8px; text-align: center;
+  }
+  .rule-card .rc-icon { font-size: 1.7rem; display:block; margin-bottom:3px; }
+  .rule-card .rc-title { font-size: .76rem; color: var(--gold); font-weight:700; margin-bottom:2px; }
+  .rule-card .rc-desc  { font-size: .7rem; color: var(--foam); opacity:.85; line-height:1.4; }
+  .chest-section {
+    background: rgba(100,60,0,.35);
+    border: 1px solid rgba(245,197,24,.3);
+    border-radius: 14px; padding: 10px 14px; margin-bottom: 18px;
+  }
+  .chest-section h3 { color: var(--gold); font-size:.85rem; margin-bottom:7px; }
+  .chest-list { display:flex; flex-wrap:wrap; gap:5px; justify-content:center; }
+  .chest-item {
+    background: rgba(10,61,98,.5); border-radius: 20px;
+    padding: 3px 10px; font-size: .72rem; color: var(--foam);
+    border: 1px solid rgba(168,230,240,.2);
+  }
+  #start-btn {
+    background: linear-gradient(135deg, #0c6291, #0a3d62);
+    color: #fff; border: 2px solid var(--gold); border-radius: 30px;
+    padding: 13px 44px; font-size: 1.05rem; font-weight:900;
+    font-family: 'Noto Sans TC', sans-serif;
+    cursor: pointer; letter-spacing: .05em;
+    box-shadow: 0 4px 20px rgba(12,98,145,.6);
+    animation: btnPulse 2s ease-in-out infinite;
+    transition: transform .15s;
+  }
+  #start-btn:hover { transform: scale(1.06); }
+  @keyframes btnPulse {
+    0%,100% { box-shadow: 0 4px 20px rgba(12,98,145,.6), 0 0 0 4px rgba(168,230,240,.15); }
+    50%      { box-shadow: 0 4px 30px rgba(12,98,145,.9), 0 0 0 8px rgba(168,230,240,.3); }
+  }
+
+
+  /* ── TITLE TYPEWRITER ── */
+  #intro-title {
+    font-family: 'Righteous', cursive;
+    font-size: 2.1rem; color: var(--gold);
+    text-shadow: 0 0 28px rgba(245,197,24,.85);
+    margin-bottom: 4px;
+    min-height: 2.6rem;
+    letter-spacing: .06em;
+  }
+  .title-char {
+    display: inline-block;
+    opacity: 0;
+    transform: translateY(18px) scale(.7);
+    animation: charIn .45s cubic-bezier(.17,.67,.35,1.3) forwards;
+  }
+  @keyframes charIn {
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  /* rules fade-in after title */
+  #intro-rules {
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity .6s ease, transform .6s ease;
+  }
+  #intro-rules.visible { opacity: 1; transform: translateY(0); }
+  #start-btn { opacity: 0; transition: opacity .5s ease .2s; }
+  #start-btn.visible { opacity: 1; }
+
+  /* ── GOGGLE TRANSITION ── */
+  #goggle-overlay {
+    position: fixed; inset: 0; z-index: 2001;
+    display: none;
+    background: transparent;
+    pointer-events: none;
+  }
+  /* The POV ocean scene shown through goggle lenses */
+  #goggle-ocean-scene {
+    position: fixed; inset: 0; z-index: 2002;
+    display: none;
+    background: linear-gradient(180deg,
+      #7dd4ef 0%, #4ab8e0 20%, #2196c8 45%, #1565a0 70%, #0a3562 100%);
+    pointer-events: none;
+  }
+  /* Ocean reveal - dissolve in from black */
+  #ocean-reveal {
+    position: fixed; inset: 0; z-index: 1500;
+    background: black;
+    pointer-events: none;
+    opacity: 0; visibility: hidden;
+  }
+
+  /* ── DIVER CURSOR (small, side view) ── */
+  #cursor.diver { transform: translate(-14px, -26px); }
+  #cursor.diver.clicking { transform: translate(-14px,-26px) scale(.88); }
+  #cursor.sub   { transform: translate(-4px, -18px); }
+  #cursor.sub.clicking { transform: translate(-4px,-18px) scale(.88) rotate(6deg); }
+
+</style>
+</head>
+<body>
+
+<!-- ═══ GOGGLE POV SYSTEM ═══
+     Layer stack (bottom→top):
+     A. intro (#intro z:1000) — ocean background, always visible until hidden
+     B. #pov-scene (z:2000) — ocean gradient shown THROUGH lenses via clip-path
+     C. #pov-anim  (z:2001) — fish + books, also clipped to lenses
+     D. #goggle-frame (z:2002) — dark surround + 3D rings (transparent inside lenses)
+     E. #goggle-blackout-layer (z:2003) — black overlay for final dissolve
+-->
+
+<!-- B: POV ocean gradient (fills entire screen, clipped to lens shapes by CSS) -->
+<div id="pov-scene" style="
+  position:fixed;inset:0;z-index:2000;display:none;pointer-events:none;
+  background:linear-gradient(180deg,#87d4f0 0%,#3aabda 20%,#1a7ab5 45%,#0e5080 70%,#072a4a 100%);
+  clip-path:url(#lens-clip-css);
+  -webkit-clip-path:url(#lens-clip-css);
+">
+  <!-- Inline SVG for clip-path definition (needs to be in DOM) -->
+  <svg width="0" height="0" style="position:absolute">
+    <defs>
+      <clipPath id="lens-clip-css" clipPathUnits="objectBoundingBox">
+        <!-- We'll use JS to set this dynamically -->
+      </clipPath>
+    </defs>
+  </svg>
+</div>
+
+<!-- C: Animated POV content (fish schools + floating books) clipped to lenses -->
+<svg id="pov-anim" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice"
+     style="position:fixed;inset:0;width:100vw;height:100vh;z-index:2001;display:none;pointer-events:none;overflow:hidden;">
+  <defs>
+    <clipPath id="pov-lens-clip">
+      <circle cx="262" cy="252" r="149"/>
+      <circle cx="538" cy="252" r="149"/>
+    </clipPath>
+    <!-- ocean gradient background inside lenses -->
+    <linearGradient id="pov-grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#87d4f0"/>
+      <stop offset="25%"  stop-color="#3aabda"/>
+      <stop offset="55%"  stop-color="#1a7ab5"/>
+      <stop offset="80%"  stop-color="#0e5080"/>
+      <stop offset="100%" stop-color="#072a4a"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#pov-lens-clip)">
+    <!-- ocean fill inside lenses -->
+    <rect width="800" height="500" fill="url(#pov-grad)"/>
+
+    <!-- LIGHT RAYS swaying -->
+    <g class="pov-rays">
+      <polygon points="160,0 195,0 130,500  95,500" fill="rgba(255,255,255,.10)"/>
+      <polygon points="290,0 325,0 260,500 225,500" fill="rgba(255,255,255,.08)"/>
+      <polygon points="395,0 425,0 368,500 338,500" fill="rgba(255,255,255,.10)"/>
+      <polygon points="490,0 520,0 462,500 432,500" fill="rgba(255,255,255,.07)"/>
+      <polygon points="600,0 632,0 574,500 542,500" fill="rgba(255,255,255,.09)"/>
+      <polygon points="695,0 722,0 666,500 639,500" fill="rgba(255,255,255,.07)"/>
+    </g>
+
+    <!-- ── FISH SCHOOL A — orange, right→left ── -->
+    <g class="fish-rl-a">
+      <g transform="translate(0,0)">
+        <ellipse cx="70" cy="185" rx="19" ry="12" fill="#f4a261"/>
+        <polygon points="89,185 103,177 103,193" fill="#f4a261"/>
+        <circle  cx="59"  cy="181" r="3"   fill="rgba(0,0,0,.5)"/>
+        <ellipse cx="110" cy="200" rx="15" ry="9"  fill="#e8956a" opacity=".85"/>
+        <polygon points="125,200 137,194 137,206" fill="#e8956a" opacity=".85"/>
+        <circle  cx="100" cy="196" r="2.5" fill="rgba(0,0,0,.45)"/>
+        <ellipse cx="50"  cy="170" rx="13" ry="8"  fill="#f4a261" opacity=".75"/>
+        <polygon points="63,170 74,164 74,176" fill="#f4a261" opacity=".75"/>
+        <ellipse cx="135" cy="215" rx="11" ry="7"  fill="#ffa07a" opacity=".7"/>
+        <polygon points="146,215 155,210 155,220" fill="#ffa07a" opacity=".7"/>
+      </g>
+    </g>
+
+    <!-- ── FISH SCHOOL B — yellow/gold, left→right ── -->
+    <g class="fish-lr-b">
+      <g transform="translate(0,0)">
+        <ellipse cx="680" cy="210" rx="17" ry="11" fill="#e9c46a"/>
+        <polygon points="663,210 651,203 651,217" fill="#e9c46a"/>
+        <circle  cx="691" cy="206" r="2.8" fill="rgba(0,0,0,.5)"/>
+        <ellipse cx="645" cy="228" rx="14" ry="8"  fill="#ddb84a" opacity=".85"/>
+        <polygon points="631,228 620,222 620,234" fill="#ddb84a" opacity=".85"/>
+        <ellipse cx="700" cy="196" rx="12" ry="7"  fill="#f5d58a" opacity=".8"/>
+        <polygon points="688,196 678,191 678,201" fill="#f5d58a" opacity=".8"/>
+        <ellipse cx="622" cy="218" rx="10" ry="6"  fill="#e9c46a" opacity=".7"/>
+        <polygon points="612,218 603,213 603,223" fill="#e9c46a" opacity=".7"/>
+      </g>
+    </g>
+
+    <!-- ── FISH SCHOOL C — teal, right→left, lower ── -->
+    <g class="fish-rl-c">
+      <g transform="translate(0,0)">
+        <ellipse cx="600" cy="305" rx="16" ry="10" fill="#4ecdc4"/>
+        <polygon points="616,305 628,299 628,311" fill="#4ecdc4"/>
+        <circle  cx="590" cy="301" r="2.5" fill="rgba(0,0,0,.48)"/>
+        <ellipse cx="570" cy="320" rx="13" ry="8"  fill="#26c6da" opacity=".85"/>
+        <polygon points="583,320 594,314 594,326" fill="#26c6da" opacity=".85"/>
+        <ellipse cx="628" cy="292" rx="11" ry="7"  fill="#4ecdc4" opacity=".75"/>
+        <polygon points="639,292 649,287 649,297" fill="#4ecdc4" opacity=".75"/>
+        <ellipse cx="548" cy="308" rx="10" ry="6"  fill="#80deea" opacity=".7"/>
+        <polygon points="558,308 567,303 567,313" fill="#80deea" opacity=".7"/>
+      </g>
+    </g>
+
+    <!-- ── FISH SCHOOL D — small purple, darting L→R ── -->
+    <g class="fish-lr-d">
+      <ellipse cx="150" cy="315" rx="12" ry="7" fill="#ce93d8"/>
+      <polygon points="138,315 128,310 128,320" fill="#ce93d8"/>
+      <ellipse cx="175" cy="300" rx="10" ry="6" fill="#ba68c8" opacity=".85"/>
+      <polygon points="165,300 156,295 156,305" fill="#ba68c8" opacity=".85"/>
+      <ellipse cx="128" cy="330" rx="9"  ry="5" fill="#e1bee7" opacity=".8"/>
+      <polygon points="119,330 111,326 111,334" fill="#e1bee7" opacity=".8"/>
+    </g>
+
+    <!-- ── FLOWING ANCIENT BOOKS — spread across both lenses ── -->
+
+    <!-- LEFT LENS books -->
+
+    <!-- Book L1: closed brown leather, drifting diagonally -->
+    <g class="book-drift-1">
+      <rect x="115" y="285" width="46" height="60" rx="3" fill="#3e2108"/>
+      <rect x="115" y="285" width="9"  height="60" rx="2" fill="#2a1505" stroke="#5c3316" stroke-width="1"/>
+      <rect x="115" y="297" width="9" height="3" rx="1" fill="#5c3316"/>
+      <rect x="115" y="310" width="9" height="3" rx="1" fill="#5c3316"/>
+      <rect x="115" y="323" width="9" height="3" rx="1" fill="#5c3316"/>
+      <rect x="115" y="336" width="9" height="3" rx="1" fill="#5c3316"/>
+      <rect x="124" y="285" width="37" height="60" rx="2" fill="#6b3a1a"/>
+      <rect x="124" y="285" width="37" height="60" rx="2" fill="none" stroke="#3e2108" stroke-width="1.5"/>
+      <rect x="157" y="288" width="4" height="54" rx="1" fill="#d4c9a0"/>
+      <line x1="157" y1="294" x2="161" y2="294" stroke="#a89060" stroke-width="1" opacity=".6"/>
+      <line x1="157" y1="300" x2="161" y2="300" stroke="#a89060" stroke-width="1" opacity=".5"/>
+      <line x1="157" y1="306" x2="161" y2="306" stroke="#a89060" stroke-width="1" opacity=".45"/>
+      <line x1="157" y1="312" x2="161" y2="312" stroke="#a89060" stroke-width="1" opacity=".4"/>
+      <line x1="157" y1="318" x2="161" y2="318" stroke="#a89060" stroke-width="1" opacity=".35"/>
+      <line x1="157" y1="324" x2="161" y2="324" stroke="#a89060" stroke-width="1" opacity=".3"/>
+      <rect x="127" y="288" width="28" height="54" rx="1" fill="none" stroke="#3e2108" stroke-width="1" opacity=".4"/>
+      <circle cx="129" cy="290" r="2" fill="#8d6a2a"/>
+      <circle cx="153" cy="290" r="2" fill="#8d6a2a"/>
+      <circle cx="129" cy="340" r="2" fill="#8d6a2a"/>
+      <circle cx="153" cy="340" r="2" fill="#8d6a2a"/>
+    </g>
+
+    <!-- Book L2: OPEN book, face-up, pages splayed wide left lens -->
+    <g class="book-drift-2">
+      <!-- left page -->
+      <path d="M155 380 Q185 373 212 380 L214 426 Q185 420 155 426Z" fill="#d8d0a0"/>
+      <line x1="163" y1="388" x2="206" y2="388" stroke="#8a7a50" stroke-width="1.2" opacity=".5"/>
+      <line x1="163" y1="395" x2="206" y2="395" stroke="#8a7a50" stroke-width="1"   opacity=".4"/>
+      <line x1="163" y1="402" x2="206" y2="402" stroke="#8a7a50" stroke-width="1"   opacity=".35"/>
+      <line x1="163" y1="409" x2="206" y2="409" stroke="#8a7a50" stroke-width="1"   opacity=".3"/>
+      <line x1="163" y1="416" x2="206" y2="416" stroke="#8a7a50" stroke-width="1"   opacity=".25"/>
+      <!-- right page (slightly darker, aged) -->
+      <path d="M212 380 Q239 373 266 380 L268 426 Q239 420 212 426Z" fill="#ccc090"/>
+      <line x1="218" y1="388" x2="260" y2="388" stroke="#8a7a50" stroke-width="1.2" opacity=".5"/>
+      <line x1="218" y1="395" x2="260" y2="395" stroke="#8a7a50" stroke-width="1"   opacity=".4"/>
+      <line x1="218" y1="402" x2="260" y2="402" stroke="#8a7a50" stroke-width="1"   opacity=".35"/>
+      <line x1="218" y1="409" x2="260" y2="409" stroke="#8a7a50" stroke-width="1"   opacity=".3"/>
+      <line x1="218" y1="416" x2="260" y2="416" stroke="#8a7a50" stroke-width="1"   opacity=".25"/>
+      <!-- spine crease -->
+      <line x1="212" y1="376" x2="213" y2="430" stroke="#3e2108" stroke-width="3" opacity=".7"/>
+      <!-- binding bottom edge -->
+      <rect x="153" y="427" width="117" height="4" rx="2" fill="#3e2108" opacity=".6"/>
+      <!-- page curl hint -->
+      <path d="M155 426 Q150 432 162 429" stroke="#b0a070" stroke-width="1.5" fill="none" opacity=".5"/>
+    </g>
+
+    <!-- Book L3: red cover tilted, drifting up-left -->
+    <g class="book-drift-3" transform="rotate(-18,200,165)">
+      <rect x="180" y="140" width="40" height="52" rx="3" fill="#7f1010"/>
+      <rect x="180" y="140" width="8"  height="52" rx="2" fill="#5c0a0a"/>
+      <rect x="180" y="151" width="8" height="3" rx="1" fill="#9b1a1a"/>
+      <rect x="180" y="161" width="8" height="3" rx="1" fill="#9b1a1a"/>
+      <rect x="180" y="171" width="8" height="3" rx="1" fill="#9b1a1a"/>
+      <rect x="180" y="181" width="8" height="3" rx="1" fill="#9b1a1a"/>
+      <rect x="188" y="140" width="32" height="52" rx="2" fill="#9b1a1a"/>
+      <rect x="188" y="140" width="32" height="52" rx="2" fill="none" stroke="#5c0a0a" stroke-width="1.5"/>
+      <rect x="216" y="143" width="4"  height="46" rx="1" fill="#d4c9a0"/>
+      <line x1="216" y1="149" x2="220" y2="149" stroke="#a89060" stroke-width="1" opacity=".6"/>
+      <line x1="216" y1="155" x2="220" y2="155" stroke="#a89060" stroke-width="1" opacity=".5"/>
+      <line x1="216" y1="161" x2="220" y2="161" stroke="#a89060" stroke-width="1" opacity=".45"/>
+      <line x1="216" y1="167" x2="220" y2="167" stroke="#a89060" stroke-width="1" opacity=".4"/>
+      <line x1="216" y1="173" x2="220" y2="173" stroke="#a89060" stroke-width="1" opacity=".35"/>
+      <rect x="191" y="143" width="23" height="46" rx="1" fill="none" stroke="#5c0a0a" stroke-width="1" opacity=".45"/>
+      <circle cx="193" cy="145" r="2" fill="#8d6a2a"/>
+      <circle cx="212" cy="145" r="2" fill="#8d6a2a"/>
+      <circle cx="193" cy="186" r="2" fill="#8d6a2a"/>
+      <circle cx="212" cy="186" r="2" fill="#8d6a2a"/>
+    </g>
+
+    <!-- RIGHT LENS books -->
+
+    <!-- Book R1: dark green, upright, slow drift -->
+    <g class="book-drift-4">
+      <rect x="490" y="160" width="44" height="58" rx="3" fill="#1a3d2a"/>
+      <rect x="490" y="160" width="8"  height="58" rx="2" fill="#0e2618"/>
+      <rect x="490" y="172" width="8" height="3" rx="1" fill="#2d6040"/>
+      <rect x="490" y="182" width="8" height="3" rx="1" fill="#2d6040"/>
+      <rect x="490" y="192" width="8" height="3" rx="1" fill="#2d6040"/>
+      <rect x="490" y="202" width="8" height="3" rx="1" fill="#2d6040"/>
+      <rect x="498" y="160" width="36" height="58" rx="2" fill="#2d6040"/>
+      <rect x="498" y="160" width="36" height="58" rx="2" fill="none" stroke="#1a3d2a" stroke-width="1.5"/>
+      <rect x="530" y="163" width="4" height="52" rx="1" fill="#d4c9a0"/>
+      <line x1="530" y1="168" x2="534" y2="168" stroke="#a89060" stroke-width="1" opacity=".6"/>
+      <line x1="530" y1="174" x2="534" y2="174" stroke="#a89060" stroke-width="1" opacity=".5"/>
+      <line x1="530" y1="180" x2="534" y2="180" stroke="#a89060" stroke-width="1" opacity=".45"/>
+      <line x1="530" y1="186" x2="534" y2="186" stroke="#a89060" stroke-width="1" opacity=".4"/>
+      <line x1="530" y1="192" x2="534" y2="192" stroke="#a89060" stroke-width="1" opacity=".35"/>
+      <rect x="501" y="163" width="27" height="52" rx="1" fill="none" stroke="#1a3d2a" stroke-width="1" opacity=".4"/>
+      <circle cx="503" cy="165" r="2" fill="#8d6a2a"/>
+      <circle cx="526" cy="165" r="2" fill="#8d6a2a"/>
+      <circle cx="503" cy="212" r="2" fill="#8d6a2a"/>
+      <circle cx="526" cy="212" r="2" fill="#8d6a2a"/>
+    </g>
+
+    <!-- Book R2: OPEN book right lens, tilted slightly -->
+    <g class="book-drift-5" transform="rotate(8,550,330)">
+      <!-- left page -->
+      <path d="M510 305 Q535 299 558 305 L560 348 Q535 342 510 348Z" fill="#d8d0a0"/>
+      <line x1="517" y1="313" x2="552" y2="313" stroke="#8a7a50" stroke-width="1" opacity=".5"/>
+      <line x1="517" y1="319" x2="552" y2="319" stroke="#8a7a50" stroke-width="1" opacity=".4"/>
+      <line x1="517" y1="325" x2="552" y2="325" stroke="#8a7a50" stroke-width="1" opacity=".35"/>
+      <line x1="517" y1="331" x2="552" y2="331" stroke="#8a7a50" stroke-width="1" opacity=".3"/>
+      <line x1="517" y1="337" x2="552" y2="337" stroke="#8a7a50" stroke-width="1" opacity=".25"/>
+      <!-- right page -->
+      <path d="M558 305 Q581 299 604 305 L606 348 Q581 342 558 348Z" fill="#ccc090"/>
+      <line x1="564" y1="313" x2="598" y2="313" stroke="#8a7a50" stroke-width="1" opacity=".5"/>
+      <line x1="564" y1="319" x2="598" y2="319" stroke="#8a7a50" stroke-width="1" opacity=".4"/>
+      <line x1="564" y1="325" x2="598" y2="325" stroke="#8a7a50" stroke-width="1" opacity=".35"/>
+      <line x1="564" y1="331" x2="598" y2="331" stroke="#8a7a50" stroke-width="1" opacity=".3"/>
+      <line x1="564" y1="337" x2="598" y2="337" stroke="#8a7a50" stroke-width="1" opacity=".25"/>
+      <line x1="558" y1="301" x2="559" y2="352" stroke="#3e2108" stroke-width="3" opacity=".7"/>
+      <rect x="508" y="349" width="100" height="4" rx="2" fill="#3e2108" opacity=".6"/>
+    </g>
+
+    <!-- Book R3: navy closed, tumbling slowly -->
+    <g class="book-drift-6" transform="rotate(-8,610,400)">
+      <rect x="590" y="370" width="40" height="54" rx="3" fill="#0a1f3d"/>
+      <rect x="590" y="370" width="8"  height="54" rx="2" fill="#050e1f"/>
+      <rect x="590" y="381" width="8" height="3" rx="1" fill="#1a3a6e"/>
+      <rect x="590" y="391" width="8" height="3" rx="1" fill="#1a3a6e"/>
+      <rect x="590" y="401" width="8" height="3" rx="1" fill="#1a3a6e"/>
+      <rect x="598" y="370" width="32" height="54" rx="2" fill="#1a3a6e"/>
+      <rect x="598" y="370" width="32" height="54" rx="2" fill="none" stroke="#0a1f3d" stroke-width="1.5"/>
+      <rect x="626" y="373" width="4"  height="48" rx="1" fill="#d4c9a0"/>
+      <line x1="626" y1="378" x2="630" y2="378" stroke="#a89060" stroke-width="1" opacity=".6"/>
+      <line x1="626" y1="384" x2="630" y2="384" stroke="#a89060" stroke-width="1" opacity=".5"/>
+      <line x1="626" y1="390" x2="630" y2="390" stroke="#a89060" stroke-width="1" opacity=".45"/>
+      <line x1="626" y1="396" x2="630" y2="396" stroke="#a89060" stroke-width="1" opacity=".4"/>
+      <line x1="626" y1="402" x2="630" y2="402" stroke="#a89060" stroke-width="1" opacity=".35"/>
+      <rect x="601" y="373" width="23" height="48" rx="1" fill="none" stroke="#0a1f3d" stroke-width="1" opacity=".4"/>
+      <circle cx="603" cy="375" r="2" fill="#8d6a2a"/>
+      <circle cx="622" cy="375" r="2" fill="#8d6a2a"/>
+      <circle cx="603" cy="417" r="2" fill="#8d6a2a"/>
+      <circle cx="622" cy="417" r="2" fill="#8d6a2a"/>
+    </g>
+
+    <!-- Gradient defs for book textures (add inside existing <defs> via separate block) -->
+
+    <!-- sand / seafloor at bottom of lenses -->
+    <ellipse cx="262" cy="455" rx="165" ry="25" fill="#c8a96e" opacity=".5"/>
+    <ellipse cx="538" cy="455" rx="165" ry="25" fill="#c8a96e" opacity=".5"/>
+    <!-- seaweed hints at bottom -->
+    <path d="M185 460 Q180 430 187 400 Q193 372 185 345" stroke="#2e7d32" stroke-width="6" fill="none" stroke-linecap="round" opacity=".7"/>
+    <path d="M345 460 Q340 438 344 415" stroke="#388e3c" stroke-width="5" fill="none" stroke-linecap="round" opacity=".6"/>
+    <path d="M620 460 Q615 432 620 402 Q626 374 619 348" stroke="#2e7d32" stroke-width="6" fill="none" stroke-linecap="round" opacity=".7"/>
+
+    <!-- bubbles rising -->
+    <circle class="bub-a" cx="222" cy="380" r="5.5" fill="rgba(255,255,255,.38)"/>
+    <circle class="bub-b" cx="298" cy="420" r="3.8" fill="rgba(255,255,255,.30)"/>
+    <circle class="bub-c" cx="490" cy="390" r="4.5" fill="rgba(255,255,255,.33)"/>
+    <circle class="bub-d" cx="572" cy="430" r="3"   fill="rgba(255,255,255,.25)"/>
+    <circle class="bub-e" cx="165" cy="350" r="3.2" fill="rgba(255,255,255,.28)"/>
+    <circle class="bub-f" cx="640" cy="360" r="4"   fill="rgba(255,255,255,.30)"/>
+
+  </g><!-- end lens clip -->
+</svg>
+
+<!-- D: GOGGLE FRAME — dark surround + 3D rings (sits OVER the pov content) -->
+<svg id="goggle-frame" viewBox="0 0 800 500" preserveAspectRatio="xMidYMid slice"
+     style="position:fixed;inset:0;width:100vw;height:100vh;z-index:2002;display:none;pointer-events:none;">
+  <defs>
+    <mask id="frame-mask">
+      <rect width="800" height="500" fill="white"/>
+      <circle cx="262" cy="252" r="149" fill="black"/>
+      <circle cx="538" cy="252" r="149" fill="black"/>
+    </mask>
+    <radialGradient id="rim1" cx="50%" cy="50%" r="50%">
+      <stop offset="80%"  stop-color="transparent"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,.6)"/>
+    </radialGradient>
+    <radialGradient id="rim2" cx="50%" cy="50%" r="50%">
+      <stop offset="80%"  stop-color="transparent"/>
+      <stop offset="100%" stop-color="rgba(0,0,0,.6)"/>
+    </radialGradient>
+    <filter id="f-blur"><feGaussianBlur stdDeviation="3.5"/></filter>
+  </defs>
+
+  <!-- dark surround outside lenses -->
+  <rect width="800" height="500" fill="rgba(5,12,22,0.93)" mask="url(#frame-mask)"/>
+
+  <!-- inner edge shadow (depth) -->
+  <circle cx="262" cy="252" r="149" fill="url(#rim1)"/>
+  <circle cx="538" cy="252" r="149" fill="url(#rim2)"/>
+
+  <!-- subtle blue lens tint -->
+  <circle cx="262" cy="252" r="149" fill="rgba(20,80,140,0.14)"/>
+  <circle cx="538" cy="252" r="149" fill="rgba(20,80,140,0.14)"/>
+
+  <!-- DROP SHADOW ring (behind frame) -->
+  <circle cx="265" cy="256" r="163" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="12" filter="url(#f-blur)"/>
+  <circle cx="541" cy="256" r="163" fill="none" stroke="rgba(0,0,0,.55)" stroke-width="12" filter="url(#f-blur)"/>
+
+  <!-- OUTER FRAME — thick dark rubber -->
+  <circle cx="262" cy="252" r="160" fill="none" stroke="#0d1117" stroke-width="22"/>
+  <circle cx="538" cy="252" r="160" fill="none" stroke="#0d1117" stroke-width="22"/>
+
+  <!-- BEVEL: top highlight -->
+  <circle cx="262" cy="252" r="160" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="3.5"
+          stroke-dasharray="220 800" stroke-dashoffset="110"/>
+  <circle cx="538" cy="252" r="160" fill="none" stroke="rgba(255,255,255,.16)" stroke-width="3.5"
+          stroke-dasharray="220 800" stroke-dashoffset="110"/>
+  <!-- BEVEL: bottom shadow -->
+  <circle cx="262" cy="252" r="160" fill="none" stroke="rgba(0,0,0,.38)" stroke-width="3"
+          stroke-dasharray="220 800" stroke-dashoffset="-70"/>
+  <circle cx="538" cy="252" r="160" fill="none" stroke="rgba(0,0,0,.38)" stroke-width="3"
+          stroke-dasharray="220 800" stroke-dashoffset="-70"/>
+
+  <!-- GOLD ACCENT ring -->
+  <circle cx="262" cy="252" r="166" fill="none" stroke="#b8860b" stroke-width="2.5" opacity=".55"/>
+  <circle cx="538" cy="252" r="166" fill="none" stroke="#b8860b" stroke-width="2.5" opacity=".55"/>
+
+  <!-- LENS GLASS SHINE (two-layer reflection) -->
+  <ellipse cx="215" cy="188" rx="56" ry="32" fill="rgba(255,255,255,.17)" transform="rotate(-28,215,188)"/>
+  <ellipse cx="220" cy="192" rx="26" ry="15" fill="rgba(255,255,255,.26)" transform="rotate(-28,220,192)"/>
+  <ellipse cx="491" cy="188" rx="56" ry="32" fill="rgba(255,255,255,.17)" transform="rotate(-28,491,188)"/>
+  <ellipse cx="496" cy="192" rx="26" ry="15" fill="rgba(255,255,255,.26)" transform="rotate(-28,496,192)"/>
+
+  <!-- small lower shine -->
+  <ellipse cx="308" cy="326" rx="20" ry="10" fill="rgba(255,255,255,.07)" transform="rotate(15,308,326)"/>
+  <ellipse cx="584" cy="326" rx="20" ry="10" fill="rgba(255,255,255,.07)" transform="rotate(15,584,326)"/>
+
+  <!-- NOSE BRIDGE — thick rubber -->
+  <path d="M416 248 Q400 236 384 248" stroke="#0d1117" stroke-width="20" fill="none" stroke-linecap="round"/>
+  <path d="M414 248 Q400 238 386 248" stroke="rgba(255,255,255,.10)" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M413 249 Q400 240 387 249" stroke="#b8860b" stroke-width="1.5" fill="none" stroke-linecap="round" opacity=".45"/>
+
+  <!-- STRAPS — rubber texture -->
+  <path d="M102 252 Q62 257 38 270"  stroke="#0d1117" stroke-width="24" fill="none" stroke-linecap="round"/>
+  <path d="M102 252 Q62 257 38 270"  stroke="rgba(255,255,255,.07)" stroke-width="4" fill="none" stroke-linecap="round"/>
+  <path d="M698 252 Q738 257 762 270" stroke="#0d1117" stroke-width="24" fill="none" stroke-linecap="round"/>
+  <path d="M698 252 Q738 257 762 270" stroke="rgba(255,255,255,.07)" stroke-width="4" fill="none" stroke-linecap="round"/>
+</svg>
+
+<!-- E: BLACKOUT layer for final dissolve -->
+<div id="goggle-blackout-div" style="position:fixed;inset:0;z-index:2003;background:black;opacity:0;display:none;pointer-events:none;transition:opacity 1.1s ease;"></div>
+
+<style>
+/* ── POV ANIMATIONS ── */
+@keyframes povRay   { from{transform:skewX(-3deg) translateX(-15px)} to{transform:skewX(3deg) translateX(15px)} }
+.pov-rays           { animation: povRay 5s ease-in-out infinite alternate; transform-origin: top center; }
+
+/* Fish R→L: starts off right, travels left */
+.fish-rl-a { animation: fishRLa 7s linear infinite; }
+.fish-rl-c { animation: fishRLc 9s linear infinite; animation-delay:-3s; }
+@keyframes fishRLa { from{transform:translateX(850px)} to{transform:translateX(-300px)} }
+@keyframes fishRLc { from{transform:translateX(750px)} to{transform:translateX(-350px)} }
+
+/* Fish L→R: starts off left, travels right */
+.fish-lr-b { animation: fishLRb 8s linear infinite; animation-delay:-1s; }
+.fish-lr-d { animation: fishLRd 6s linear infinite; animation-delay:-4s; }
+@keyframes fishLRb { from{transform:translateX(-800px)} to{transform:translateX(350px)} }
+@keyframes fishLRd { from{transform:translateX(-700px)} to{transform:translateX(900px)} }
+
+/* Books floating gently */
+.book-drift-1 { animation: bDrift1 10s ease-in-out infinite; }
+.book-drift-2 { animation: bDrift2 13s ease-in-out infinite; animation-delay:-4s; }
+.book-drift-3 { animation: bDrift3 15s ease-in-out infinite; animation-delay:-7s; }
+.book-drift-4 { animation: bDrift4 11s ease-in-out infinite; animation-delay:-2s; }
+.book-drift-5 { animation: bDrift5 12s ease-in-out infinite; animation-delay:-9s; }
+@keyframes bDrift6 {
+  0%   { transform: rotate(-8deg) translate(0,0); }
+  40%  { transform: rotate(-12deg) translate(6px,-22px); }
+  70%  { transform: rotate(-5deg) translate(-8px,-12px); }
+  100% { transform: rotate(-8deg) translate(0,0); }
+}
+.book-drift-6 { animation: bDrift6 14s ease-in-out infinite; animation-delay:-6s; }
+@keyframes bDrift1 { 0%,100%{transform:translate(0,0) rotate(0deg)}   40%{transform:translate(-8px,-20px) rotate(3deg)}  70%{transform:translate(5px,-10px) rotate(-2deg)} }
+@keyframes bDrift2 { 0%,100%{transform:rotate(-14deg) translate(0,0)} 35%{transform:rotate(-10deg) translate(-10px,-24px)} 70%{transform:rotate(-17deg) translate(6px,-12px)} }
+@keyframes bDrift3 { 0%,100%{transform:translate(0,0) rotate(0deg)}   50%{transform:translate(10px,-28px) rotate(-5deg)} }
+@keyframes bDrift4 { 0%,100%{transform:translate(0,0) rotate(0deg)}   35%{transform:translate(-12px,-22px) rotate(4deg)} 70%{transform:translate(8px,-14px) rotate(-3deg)} }
+@keyframes bDrift5 { 0%,100%{transform:rotate(10deg) translate(0,0)}  45%{transform:rotate(6deg) translate(-8px,-18px)} }
+
+/* Bubbles */
+.bub-a { animation: bubRise 4.2s ease-in-out infinite; }
+.bub-b { animation: bubRise 5.8s ease-in-out infinite; animation-delay:-1.2s; }
+.bub-c { animation: bubRise 5.0s ease-in-out infinite; animation-delay:-2.5s; }
+.bub-d { animation: bubRise 4.6s ease-in-out infinite; animation-delay:-0.8s; }
+.bub-e { animation: bubRise 6.2s ease-in-out infinite; animation-delay:-3.5s; }
+.bub-f { animation: bubRise 5.4s ease-in-out infinite; animation-delay:-4.8s; }
+@keyframes bubRise { 0%{transform:translateY(0);opacity:.7} 100%{transform:translateY(-160px);opacity:0} }
+</style>
+<!-- Ocean Reveal Black -->
+<div id="ocean-reveal"></div>
+
+<!-- Cursor (starts as submarine, switches to diver in-game) -->
+<div id="cursor" class="sub">
+<img id="cursor-diver" src="data:image/png;base64,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" width="79" height="40"/>
+<svg id="cursor-sub" width="72" height="40" viewBox="0 0 72 40" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="66" cy="16" rx="3" ry="7" fill="#a8dadc" opacity=".8" transform="rotate(-20,66,16)"/>
+  <ellipse cx="66" cy="24" rx="3" ry="7" fill="#a8dadc" opacity=".8" transform="rotate(20,66,24)"/>
+  <ellipse cx="32" cy="20" rx="28" ry="12" fill="#f5c518"/>
+  <ellipse cx="32" cy="20" rx="28" ry="12" fill="none" stroke="#c8a000" stroke-width="1.5"/>
+  <path d="M4 20 Q0 20 4 14 L4 26 Z" fill="#e6b800"/>
+  <rect x="22" y="8" width="14" height="8" rx="3" fill="#e6b800" stroke="#c8a000" stroke-width="1"/>
+  <rect x="27" y="2" width="3" height="8" rx="1.5" fill="#c8a000"/>
+  <rect x="24" y="2" width="9" height="3" rx="1.5" fill="#c8a000"/>
+  <circle cx="18" cy="21" r="5" fill="#a8e6f0" stroke="#c8a000" stroke-width="1.5"/>
+  <circle cx="18" cy="21" r="3" fill="#cff4fc" opacity=".7"/>
+  <circle cx="34" cy="21" r="4" fill="#a8e6f0" stroke="#c8a000" stroke-width="1.5"/>
+  <circle cx="34" cy="21" r="2.5" fill="#cff4fc" opacity=".7"/>
+  <line x1="6" y1="20" x2="58" y2="20" stroke="#c8a000" stroke-width="1" opacity=".4"/>
+  <circle cx="62" cy="17" r="2" fill="rgba(168,230,240,.6)"/>
+  <circle cx="60" cy="23" r="1.5" fill="rgba(168,230,240,.5)"/>
+</svg>
+</div>
+
+<!-- Intro Screen -->
+<div id="intro">
+
+  <!-- Ocean background -->
+  <div id="intro-ocean"></div>
+
+  <!-- Water surface -->
+  <div id="intro-surface">
+    <div class="wave-line" style="top:6px;  animation-duration:7s;  opacity:.6;"></div>
+    <div class="wave-line" style="top:18px; animation-duration:11s; opacity:.45; animation-delay:-3s;"></div>
+    <div class="wave-line" style="top:30px; animation-duration:9s;  opacity:.3;  animation-delay:-6s;"></div>
+    <div class="wave-line" style="top:44px; animation-duration:14s; opacity:.2;  animation-delay:-1s;"></div>
+  </div>
+
+  <!-- Ship sailing across surface -->
+  <div id="intro-ship">
+    <svg width="210" height="90" viewBox="0 0 210 90" xmlns="http://www.w3.org/2000/svg">
+      <!-- hull -->
+      <path d="M10 55 Q20 75 105 78 Q190 75 200 55 Z" fill="#3d2b1f"/>
+      <path d="M10 55 Q20 75 105 78 Q190 75 200 55 Z" fill="none" stroke="#5c3d28" stroke-width="2"/>
+      <!-- hull side band -->
+      <path d="M18 58 Q105 72 192 58" stroke="#c8a000" stroke-width="2.5" fill="none" opacity=".7"/>
+      <!-- cabin -->
+      <rect x="55" y="28" width="80" height="28" rx="4" fill="#e8d5b0"/>
+      <rect x="55" y="28" width="80" height="28" rx="4" fill="none" stroke="#c8a000" stroke-width="1.5"/>
+      <!-- windows -->
+      <circle cx="76"  cy="42" r="6" fill="#87ceeb" stroke="#888" stroke-width="1.5"/>
+      <circle cx="97"  cy="42" r="6" fill="#87ceeb" stroke="#888" stroke-width="1.5"/>
+      <circle cx="118" cy="42" r="6" fill="#87ceeb" stroke="#888" stroke-width="1.5"/>
+      <!-- mast -->
+      <line x1="105" y1="4" x2="105" y2="28" stroke="#5c3d28" stroke-width="3" stroke-linecap="round"/>
+      <!-- flag -->
+      <polygon points="105,4 130,12 105,20" fill="#c0000a" opacity=".9"/>
+      <!-- smoke -->
+      <circle cx="78" cy="22" r="5" fill="rgba(200,200,200,.5)"/>
+      <circle cx="85" cy="14" r="7" fill="rgba(180,180,180,.4)"/>
+      <circle cx="92" cy="7"  r="5" fill="rgba(160,160,160,.3)"/>
+      <!-- deck rail -->
+      <line x1="58" y1="28" x2="132" y2="28" stroke="#888" stroke-width="1.5"/>
+      <!-- anchor -->
+      <text x="155" y="68" font-size="16" opacity=".7">⚓</text>
+    </svg>
+  </div>
+
+  <!-- Sun rays -->
+  <div class="i-ray" style="left:15%; animation-delay:0s;    opacity:.7;"></div>
+  <div class="i-ray" style="left:28%; animation-delay:1.2s;  opacity:.55; width:60px;"></div>
+  <div class="i-ray" style="left:40%; animation-delay:0.5s;  opacity:.8;  width:100px;"></div>
+  <div class="i-ray" style="left:54%; animation-delay:2s;    opacity:.6;  width:70px;"></div>
+  <div class="i-ray" style="left:67%; animation-delay:0.8s;  opacity:.5;  width:55px;"></div>
+  <div class="i-ray" style="left:78%; animation-delay:1.5s;  opacity:.65; width:90px;"></div>
+
+  <!-- Bubbles -->
+  <div class="i-bubble" style="width:8px;height:8px;   left:12%; bottom:30%; animation-duration:5s;"></div>
+  <div class="i-bubble" style="width:5px;height:5px;   left:25%; bottom:20%; animation-duration:7s; animation-delay:-2s;"></div>
+  <div class="i-bubble" style="width:10px;height:10px; left:45%; bottom:15%; animation-duration:6s; animation-delay:-4s;"></div>
+  <div class="i-bubble" style="width:6px;height:6px;   left:62%; bottom:25%; animation-duration:8s; animation-delay:-1s;"></div>
+  <div class="i-bubble" style="width:9px;height:9px;   left:80%; bottom:18%; animation-duration:5.5s; animation-delay:-3s;"></div>
+  <div class="i-bubble" style="width:4px;height:4px;   left:90%; bottom:35%; animation-duration:9s; animation-delay:-5s;"></div>
+
+  <!-- Intro fish — L→R wrapper has style="transform:scaleX(-1)" so nose faces right -->
+  <div class="i-fish" style="top:32%; animation-name:fishSwimR; animation-duration:16s; animation-delay:0s; transform:scaleX(-1);">
+    <svg width="52" height="34" viewBox="0 0 52 34">
+      <polygon points="0,17 14,8 14,26" fill="#f4a261" opacity=".85"/>
+      <ellipse cx="30" cy="17" rx="18" ry="11" fill="#f4a261"/>
+      <circle cx="40" cy="13" r="3" fill="rgba(0,0,0,.5)"/>
+    </svg>
+  </div>
+  <div class="i-fish" style="top:60%; animation-name:fishSwimR; animation-duration:23s; animation-delay:-8s; transform:scaleX(-1);">
+    <svg width="44" height="28" viewBox="0 0 44 28">
+      <polygon points="0,14 12,6 12,22" fill="#4ecdc4" opacity=".85"/>
+      <ellipse cx="26" cy="14" rx="16" ry="10" fill="#4ecdc4"/>
+      <circle cx="34" cy="10" r="2.5" fill="rgba(0,0,0,.5)"/>
+    </svg>
+  </div>
+  <div class="i-fish" style="top:48%; animation-name:fishSwimR; animation-duration:19s; animation-delay:-13s; transform:scaleX(-1);">
+    <svg width="36" height="24" viewBox="0 0 36 24">
+      <polygon points="0,12 10,5 10,19" fill="#a8dadc" opacity=".8"/>
+      <ellipse cx="22" cy="12" rx="12" ry="8" fill="#a8dadc"/>
+      <circle cx="29" cy="9" r="2" fill="rgba(0,0,0,.45)"/>
+    </svg>
+  </div>
+  <!-- R→L fish: nose faces left naturally, no flip needed -->
+  <div class="i-fish" style="top:42%; animation-name:fishSwimL; animation-duration:20s; animation-delay:-4s;">
+    <svg width="50" height="32" viewBox="0 0 50 32">
+      <polygon points="0,16 14,7 14,25" fill="#e9c46a" opacity=".85"/>
+      <ellipse cx="30" cy="16" rx="18" ry="12" fill="#e9c46a"/>
+      <circle cx="40" cy="12" r="3" fill="rgba(0,0,0,.5)"/>
+    </svg>
+  </div>
+  <div class="i-fish" style="top:70%; animation-name:fishSwimL; animation-duration:26s; animation-delay:-17s;">
+    <svg width="38" height="24" viewBox="0 0 38 24">
+      <polygon points="0,12 11,5 11,19" fill="#ff6b6b" opacity=".8"/>
+      <ellipse cx="24" cy="12" rx="13" ry="9" fill="#ff6b6b"/>
+      <circle cx="32" cy="9" r="2.2" fill="rgba(0,0,0,.5)"/>
+    </svg>
+  </div>
+  <div class="i-fish" style="top:55%; animation-name:fishSwimL; animation-duration:31s; animation-delay:-22s;">
+    <svg width="42" height="28" viewBox="0 0 42 28">
+      <polygon points="0,14 12,6 12,22" fill="#c77dff" opacity=".8"/>
+      <ellipse cx="26" cy="14" rx="14" ry="10" fill="#c77dff"/>
+      <circle cx="34" cy="10" r="2.5" fill="rgba(0,0,0,.45)"/>
+    </svg>
+  </div>
+
+  <!-- Sea floor: reference-style coral reef -->
+  <div id="intro-floor">
+    <svg style="position:absolute;left:0;bottom:0;width:100%;height:100%;overflow:visible"
+         viewBox="0 0 1200 180" preserveAspectRatio="xMinYMax slice" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="sandGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#c8a96e"/><stop offset="100%" stop-color="#a07840"/>
+        </linearGradient>
+        <linearGradient id="rockL" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#5d4e37"/><stop offset="100%" stop-color="#8d7355"/>
+        </linearGradient>
+        <linearGradient id="rockR" x1="1" y1="0" x2="0" y2="0">
+          <stop offset="0%" stop-color="#5d4e37"/><stop offset="100%" stop-color="#8d7355"/>
+        </linearGradient>
+      </defs>
+
+      <!-- SAND FLOOR -->
+      <rect x="0" y="100" width="1200" height="80" fill="url(#sandGrad)"/>
+      <!-- sand ripples -->
+      <path d="M100 115 Q200 110 300 115 Q400 120 500 115 Q600 110 700 115 Q800 120 900 115 Q1000 110 1100 115"
+            stroke="rgba(160,120,60,.4)" stroke-width="2" fill="none"/>
+      <path d="M150 130 Q280 125 410 130 Q540 135 670 130 Q800 125 930 130 Q1060 135 1190 130"
+            stroke="rgba(160,120,60,.3)" stroke-width="1.5" fill="none"/>
+
+      <!-- LEFT ROCK WALL (like reference) -->
+      <path d="M0 180 L0 60 Q40 40 80 55 Q110 30 130 60 Q150 80 140 100 Q160 85 170 110 L170 180Z"
+            fill="url(#rockL)"/>
+      <path d="M0 180 L0 60 Q40 40 80 55 Q110 30 130 60 Q150 80 140 100 Q160 85 170 110 L170 180Z"
+            fill="none" stroke="#3e2c1a" stroke-width="1.5" opacity=".4"/>
+      <!-- rock shadow -->
+      <path d="M168 110 L170 180 L120 180 Q140 140 168 110Z" fill="rgba(0,0,0,.2)"/>
+
+      <!-- RIGHT ROCK WALL -->
+      <path d="M1200 180 L1200 60 Q1160 40 1120 55 Q1090 30 1070 60 Q1050 80 1060 100 Q1040 85 1030 110 L1030 180Z"
+            fill="url(#rockR)"/>
+      <path d="M1200 180 L1200 60 Q1160 40 1120 55 Q1090 30 1070 60 Q1050 80 1060 100 Q1040 85 1030 110 L1030 180Z"
+            fill="none" stroke="#3e2c1a" stroke-width="1.5" opacity=".4"/>
+
+      <!-- ── LEFT SEAWEED CLUSTER (reference: leafy, varied greens) ── -->
+      <!-- tall kelp blades -->
+      <path d="M195 180 Q188 150 196 120 Q202 92 195 65" stroke="#2e7d32" stroke-width="9" fill="none" stroke-linecap="round"/>
+      <path d="M195 180 Q204 150 198 120 Q192 92 200 65" stroke="#388e3c" stroke-width="6" fill="none" stroke-linecap="round" opacity=".7"/>
+      <!-- wide leaf left -->
+      <path d="M195 130 Q172 118 168 100 Q180 108 195 118Z" fill="#43a047" opacity=".9"/>
+      <path d="M196 110 Q174 95 172 78 Q183 88 196 100Z"    fill="#2e7d32" opacity=".8"/>
+      <!-- wide leaf right -->
+      <path d="M196 140 Q218 128 222 108 Q210 118 196 128Z" fill="#66bb6a" opacity=".85"/>
+      <path d="M197 118 Q220 103 224 86 Q212 96 197 107Z"   fill="#388e3c" opacity=".75"/>
+
+      <!-- blue teal seaweed cluster -->
+      <path d="M230 180 Q222 155 228 130 Q233 108 226 85" stroke="#00838f" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <path d="M228 145 Q210 132 207 115 Q218 122 228 134Z" fill="#00acc1" opacity=".8"/>
+      <path d="M229 120 Q212 105 210 88 Q220 97 229 109Z"   fill="#0097a7" opacity=".75"/>
+      <path d="M229 155 Q248 142 250 124 Q239 133 229 144Z" fill="#26c6da" opacity=".8"/>
+
+      <!-- mixed green-teal cluster centre-left -->
+      <path d="M270 180 Q262 152 268 125 Q274 100 265 75" stroke="#1b5e20" stroke-width="8" fill="none" stroke-linecap="round"/>
+      <path d="M268 135 Q248 120 245 102 Q257 110 268 123Z" fill="#4caf50" opacity=".85"/>
+      <path d="M269 110 Q250 93 249 76 Q260 84 269 97Z"    fill="#2e7d32" opacity=".8"/>
+      <path d="M269 155 Q290 142 293 122 Q281 132 269 144Z" fill="#81c784" opacity=".8"/>
+
+      <!-- ── CENTRE CORAL REEF (reference: varied shapes, colours) ── -->
+      <!-- brain coral -->
+      <ellipse cx="420" cy="112" rx="38" ry="24" fill="#8d6e63"/>
+      <ellipse cx="420" cy="108" rx="34" ry="20" fill="#a1887f"/>
+      <path d="M386 108 Q395 96 404 108 Q413 96 422 108 Q431 96 440 108 Q449 96 454 108"
+            stroke="#6d4c41" stroke-width="2" fill="none" opacity=".7"/>
+      <path d="M388 116 Q397 104 406 116 Q415 104 424 116 Q433 104 442 116 Q449 104 452 116"
+            stroke="#6d4c41" stroke-width="2" fill="none" opacity=".5"/>
+
+      <!-- blue coral bush -->
+      <path d="M480 136 L480 105 Q470 95 462 80 M480 105 Q490 93 498 78 M480 115 Q465 108 455 95 M480 115 Q496 107 505 93"
+            stroke="#1565c0" stroke-width="4" fill="none" stroke-linecap="round"/>
+      <circle cx="462" cy="78" r="6" fill="#1e88e5"/><circle cx="498" cy="76" r="6" fill="#1e88e5"/>
+      <circle cx="455" cy="93" r="5" fill="#42a5f5"/><circle cx="505" cy="91" r="5" fill="#42a5f5"/>
+
+      <!-- green coral mound -->
+      <ellipse cx="560" cy="118" rx="32" ry="18" fill="#33691e"/>
+      <ellipse cx="560" cy="113" rx="28" ry="15" fill="#558b2f"/>
+      <path d="M535 113 Q543 103 552 113 Q560 103 568 113 Q576 103 585 113"
+            stroke="#1b5e20" stroke-width="2" fill="none" opacity=".7"/>
+
+      <!-- tall red-orange branching coral -->
+      <line x1="620" y1="136" x2="620" y2="92" stroke="#bf360c" stroke-width="5" stroke-linecap="round"/>
+      <line x1="620" y1="108" x2="600" y2="80" stroke="#e64a19" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="620" y1="100" x2="640" y2="72" stroke="#e64a19" stroke-width="3.5" stroke-linecap="round"/>
+      <line x1="600" y1="80"  x2="593" y2="62" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="600" y1="80"  x2="607" y2="60" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="640" y1="72"  x2="633" y2="54" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round"/>
+      <line x1="640" y1="72"  x2="648" y2="54" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round"/>
+      <circle cx="593" cy="60" r="5" fill="#ff8a65"/><circle cx="607" cy="58" r="5" fill="#ff8a65"/>
+      <circle cx="633" cy="52" r="5" fill="#ff8a65"/><circle cx="648" cy="52" r="5" fill="#ff8a65"/>
+
+      <!-- flat disc coral -->
+      <ellipse cx="680" cy="120" rx="28" ry="10" fill="#ad1457" opacity=".85"/>
+      <ellipse cx="680" cy="117" rx="24" ry="8"  fill="#e91e63" opacity=".8"/>
+      <path d="M655 117 Q663 110 671 117 Q679 110 687 117 Q695 110 703 117"
+            stroke="#880e4f" stroke-width="1.5" fill="none" opacity=".6"/>
+
+      <!-- ── RIGHT SEAWEED CLUSTER ── -->
+      <!-- tall kelp -->
+      <path d="M780 180 Q772 150 778 118 Q784 88 776 60" stroke="#2e7d32" stroke-width="9" fill="none" stroke-linecap="round"/>
+      <path d="M780 180 Q789 150 783 118 Q777 88 785 60" stroke="#388e3c" stroke-width="6" fill="none" stroke-linecap="round" opacity=".7"/>
+      <path d="M779 138 Q760 125 756 107 Q768 115 779 127Z" fill="#43a047" opacity=".9"/>
+      <path d="M779 115 Q758 100 756 82 Q767 91 779 104Z"   fill="#2e7d32" opacity=".8"/>
+      <path d="M780 148 Q800 135 804 116 Q792 125 780 137Z" fill="#66bb6a" opacity=".85"/>
+
+      <!-- blue seaweed right -->
+      <path d="M825 180 Q816 154 822 128 Q828 104 820 80" stroke="#006064" stroke-width="7" fill="none" stroke-linecap="round"/>
+      <path d="M821 148 Q801 134 798 116 Q810 124 821 137Z" fill="#00bcd4" opacity=".8"/>
+      <path d="M822 124 Q803 108 802 90 Q813 99 822 112Z"   fill="#0097a7" opacity=".75"/>
+      <path d="M822 158 Q843 145 846 126 Q834 136 822 147Z" fill="#26c6da" opacity=".8"/>
+
+      <!-- wide-leaf green right -->
+      <path d="M860 180 Q852 155 857 128 Q863 103 854 78" stroke="#1b5e20" stroke-width="8" fill="none" stroke-linecap="round"/>
+      <path d="M856 140 Q836 126 833 108 Q845 116 856 128Z" fill="#4caf50" opacity=".85"/>
+      <path d="M857 115 Q837 99 836 82 Q847 90 857 103Z"   fill="#2e7d32" opacity=".8"/>
+      <path d="M857 157 Q878 144 881 125 Q869 134 857 146Z" fill="#81c784" opacity=".8"/>
+
+      <!-- SCATTERED PEBBLES on sand -->
+      <ellipse cx="350" cy="125" rx="12" ry="7" fill="#9e9e9e" opacity=".6"/>
+      <ellipse cx="730" cy="122" rx="10" ry="6" fill="#9e9e9e" opacity=".5"/>
+      <ellipse cx="500" cy="130" rx="8"  ry="5" fill="#8d7355" opacity=".5"/>
+      <ellipse cx="640" cy="128" rx="9"  ry="5" fill="#9e9e9e" opacity=".45"/>
+
+      <!-- oxygen tank on sand -->
+      <rect x="740" y="92" width="14" height="36" rx="7" fill="#b0bec5" stroke="#78909c" stroke-width="1.2"/>
+      <rect x="742" y="90" width="10" height="5"  rx="2.5" fill="#cfd8dc"/>
+      <path d="M754 106 Q762 108 760 116" stroke="#4ecdc4" stroke-width="2" fill="none" stroke-linecap="round"/>
+
+    </svg>
+  </div>
+  <!-- Info panel -->
+  <div id="intro-panel">
+    <div id="intro-title"></div>
+    <div class="subtitle" style="opacity:0;transition:opacity .5s" id="intro-subtitle">捕魚分類大作戰 — 潛入深海，征服知識！</div>
+
+    <div id="intro-rules"><div class="rules-grid">
+      <div class="rule-card">
+        <span class="rc-icon">🎯</span>
+        <div class="rc-title">基本得分</div>
+        <div class="rc-desc">每答對一本書<br><b style="color:var(--gold)">+10 分</b></div>
+      </div>
+      <div class="rule-card">
+        <span class="rc-icon">🔥</span>
+        <div class="rc-title">連擊加成</div>
+        <div class="rc-desc">連續答對<br>每題額外 <b style="color:var(--gold)">+5 分</b></div>
+      </div>
+      <div class="rule-card">
+        <span class="rc-icon">❤️</span>
+        <div class="rc-title">答錯扣命</div>
+        <div class="rc-desc">共 3 條命<br>答錯連擊歸零</div>
+      </div>
+      <div class="rule-card">
+        <span class="rc-icon">⏰</span>
+        <div class="rc-title">60 秒限時</div>
+        <div class="rc-desc">時間到或命盡<br>遊戲結束</div>
+      </div>
+    </div>
+
+    <div class="chest-section">
+      <h3>🏴‍☠️ 海底藏寶箱獎勵</h3>
+      <div class="chest-list">
+        <div class="chest-item">💰 +20分 寶藏</div>
+        <div class="chest-item">💎 +30分 寶石</div>
+        <div class="chest-item">⭐ +15分 星星</div>
+        <div class="chest-item">⏳ 延長10秒</div>
+        <div class="chest-item">❤️ 多一條命</div>
+        <div class="chest-item">📖 書本魚出現</div>
+      </div>
+    </div>
+
+    <button id="start-btn" onclick="launchGame()">🤿 潛入深海！</button>
+    </div></div><!-- /intro-rules -->
+  </div>
+</div>
+
+<!-- Ocean -->
+<div id="ocean"></div>
+<div id="floor"></div>
+
+<!-- HUD -->
+<div id="hud">
+  <div class="title">🐠 海底圖書館</div>
+  <div class="stat-box">得分<span id="score-val">0</span></div>
+  <div class="stat-box">連擊<span id="combo-val">0</span>🔥</div>
+  <div class="stat-box">剩餘<span id="lives-val">❤️❤️❤️</span></div>
+  <div class="stat-box">時間<span id="time-val">60</span>s</div>
+</div>
+
+<!-- Category Legend -->
+<div id="legend"></div>
+
+<!-- Progress -->
+<div id="prog-wrap">
+  <div id="prog-bar"><div id="prog-fill"></div></div>
+  <div id="prog-label">捕捉進度</div>
+</div>
+
+<!-- Question Card -->
+<div id="question-card">
+  <h2>🎣 這本書屬於哪個類別？</h2>
+  <div class="book-name" id="qbook"></div>
+  <div class="opts" id="qopts"></div>
+</div>
+
+<!-- Toast -->
+<div id="toast">
+  <div class="t-icon" id="t-icon"></div>
+  <div class="t-msg"  id="t-msg"></div>
+  <div class="t-hint" id="t-hint"></div>
+</div>
+<!-- Click blocker: transparent overlay during toast to prevent fish clicks -->
+<div id="click-blocker" style="display:none;position:fixed;inset:0;z-index:250;cursor:default;"></div>
+
+<!-- Game Over -->
+<div id="gameover">
+  <div style="font-size:4rem">🐳</div>
+  <h1>遊戲結束！</h1>
+  <p id="go-score"></p>
+  <p id="go-caught"></p>
+  <button onclick="restartGame()">再玩一次 🎣</button>
+</div>
+
+<script>
+// ─── DATA ───────────────────────────────────────────────────────────────
+const CATEGORIES = [
+  { id:'0', label:'總類',    color:'#a8dadc', emoji:'📚', desc:'百科、圖書館學' },
+  { id:'1', label:'哲學',    color:'#c77dff', emoji:'🧠', desc:'哲學、心理學' },
+  { id:'2', label:'宗教',    color:'#f4a261', emoji:'🕌', desc:'宗教、神學' },
+  { id:'3', label:'科學',    color:'#74c69d', emoji:'🔬', desc:'自然科學、數學' },
+  { id:'4', label:'應用科學', color:'#48cae4', emoji:'⚙️', desc:'工程、醫學、農業' },
+  { id:'5', label:'社會科學', color:'#4ecdc4', emoji:'👥', desc:'政治、法律、經濟' },
+  { id:'6', label:'中國史地', color:'#e9c46a', emoji:'🏯', desc:'中國歷史、地理' },
+  { id:'7', label:'世界史地與名人傳記', color:'#f4acb7', emoji:'🗺️', desc:'世界歷史、地理' },
+  { id:'8', label:'語文',    color:'#f7d488', emoji:'✍️', desc:'語言、文學' },
+  { id:'9', label:'藝術',    color:'#ff9f9f', emoji:'🎨', desc:'美術、音樂、戲劇' },
+];
+
+const BOOKS = [
+  // 0 總類
+  { title:'百科全書', cat:'0' },
+  { title:'圖書館學導論', cat:'0' },
+  // 1 哲學
+  { title:'論語', cat:'1' },
+  { title:'心理學概論', cat:'1' },
+  { title:'尼采哲學', cat:'1' },
+  // 2 宗教
+  { title:'佛教入門', cat:'2' },
+  { title:'聖經故事', cat:'2' },
+  { title:'伊斯蘭文化', cat:'2' },
+  // 3 科學
+  { title:'量子力學', cat:'3' },
+  { title:'微積分', cat:'3' },
+  { title:'宇宙大爆炸', cat:'3' },
+  // 4 應用科學
+  { title:'建築工程學', cat:'4' },
+  { title:'人體解剖學', cat:'4' },
+  { title:'烹飪科學', cat:'4' },
+  // 5 社會科學
+  { title:'民主理論', cat:'5' },
+  { title:'法律常識', cat:'5' },
+  { title:'社會學導論', cat:'5' },
+  { title:'經濟學原理', cat:'5' },
+  // 6 中國史地
+  { title:'台灣史', cat:'6' },
+  { title:'中國地理', cat:'6' },
+  // 7 世界史地
+  { title:'古希臘史', cat:'7' },
+  { title:'世界地圖集', cat:'7' },
+  { title:'二戰全史', cat:'7' },
+  // 8 語文
+  { title:'中文文法', cat:'8' },
+  { title:'英語寫作', cat:'8' },
+  { title:'日語入門', cat:'8' },
+  { title:'唐詩三百首', cat:'8' },
+  { title:'紅樓夢', cat:'8' },
+  { title:'老人與海', cat:'8' },
+  // 9 藝術
+  { title:'鋼琴入門', cat:'9' },
+  { title:'攝影構圖學', cat:'9' },
+  { title:'梵谷畫傳', cat:'9' },
+  { title:'舞蹈藝術概論', cat:'9' },
+  // 新增書目
+  { title:'恐龍圖鑑小百科', cat:'3' },
+  { title:'科學實驗王', cat:'3' },
+  { title:'法布爾老師的昆蟲教室', cat:'3' },
+  { title:'賈伯斯傳', cat:'7' },
+  { title:'原子習慣', cat:'1' },
+  { title:'攝影學', cat:'9' },
+  { title:'被討厭的勇氣', cat:'1' },
+  { title:'別對每件事都有反應', cat:'1' },
+  { title:'神奇柑仔店', cat:'8' },
+  { title:'哈利波特', cat:'8' },
+  { title:'希臘羅馬神話故事', cat:'2' },
+  { title:'解憂雜貨店', cat:'8' },
+  { title:'天龍八部', cat:'8' },
+  { title:'三國演義', cat:'8' },
+  { title:'露營入門圖解書', cat:'9' },
+  { title:'如果歷史是一群喵', cat:'6' },
+  { title:'10歲開始學理財', cat:'5' },
+  { title:'窮爸爸與富爸爸', cat:'5' },
+  { title:'雪球：巴菲特傳', cat:'7' },
+  { title:'博物館學', cat:'0' },
+  { title:'編織手藝', cat:'4' },
+  { title:'摺紙百科', cat:'9' },
+  { title:'小醫師復仇者聯盟', cat:'4' },
+];
+
+const FISH_SHAPES = [
+  // simple SVG fish shapes (pointing right)
+  (color, scale=1) => `<svg width="${60*scale}" height="${38*scale}" viewBox="0 0 60 38" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="28" cy="19" rx="22" ry="13" fill="${color}"/>
+    <polygon points="50,19 60,8 60,30" fill="${color}" opacity=".85"/>
+    <circle cx="16" cy="16" r="3.5" fill="rgba(0,0,0,.6)"/>
+    <ellipse cx="28" cy="19" rx="22" ry="13" fill="none" stroke="rgba(255,255,255,.25)" stroke-width="1.2"/>
+    <path d="M 20 12 Q 30 8 38 14" stroke="rgba(255,255,255,.3)" fill="none" stroke-width="1"/>
+  </svg>`,
+  (color, scale=1) => `<svg width="${55*scale}" height="${42*scale}" viewBox="0 0 55 42" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="25" cy="21" rx="20" ry="15" fill="${color}"/>
+    <polygon points="45,21 55,10 55,32" fill="${color}" opacity=".8"/>
+    <circle cx="14" cy="17" r="3" fill="rgba(0,0,0,.55)"/>
+    <line x1="18" y1="10" x2="18" y2="32" stroke="rgba(255,255,255,.2)" stroke-width="1.5"/>
+    <line x1="24" y1="8" x2="24" y2="34" stroke="rgba(255,255,255,.2)" stroke-width="1.2"/>
+  </svg>`,
+  (color, scale=1) => `<svg width="${65*scale}" height="${35*scale}" viewBox="0 0 65 35" xmlns="http://www.w3.org/2000/svg">
+    <ellipse cx="30" cy="17" rx="26" ry="12" fill="${color}"/>
+    <polygon points="56,17 65,5 65,29" fill="${color}" opacity=".9"/>
+    <circle cx="17" cy="14" r="4" fill="rgba(0,0,0,.6)"/>
+    <ellipse cx="30" cy="17" rx="14" ry="7" fill="rgba(255,255,255,.12)"/>
+  </svg>`,
+];
+
+// ─── STATE ───────────────────────────────────────────────────────────────
+let score=0, combo=0, lives=3, timeLeft=60, caught=0;
+let activeFish=[], currentFish=null, timer=null;
+let gameRunning=false;
+let totalBooks=0, answered=0;
+
+// ─── OCEAN DECORATION ───────────────────────────────────────────────────
+function buildOcean() {
+  const ocean = document.getElementById('ocean');
+  // rays
+  for(let i=0;i<6;i++){
+    const r=document.createElement('div'); r.className='ray';
+    r.style.left=(8+i*16)+'%';
+    r.style.animationDelay=(i*1.3)+'s';
+    r.style.opacity=.4+Math.random()*.3;
+    ocean.appendChild(r);
+  }
+  // bubbles
+  for(let i=0;i<22;i++) spawnBubble(ocean,true);
+  // weeds — two types like reference image
+  const floor = document.getElementById('floor');
+
+  // Type A: feathery/branching (羽毛狀) — thin stem with side branches
+  function makeFernWeed(x, h, delay, dur) {
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    const w = h * 0.6;
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.classList.add('weed');
+    svg.style.left = x;
+    svg.style.animationName = Math.random()>.5 ? 'weedSway' : 'weedSway2';
+    svg.style.animationDuration = dur + 's';
+    svg.style.animationDelay = delay + 's';
+    svg.style.animationTimingFunction = 'ease-in-out';
+    svg.style.animationIterationCount = 'infinite';
+    const cx = w/2;
+    const g1 = '#1a7a3e', g2 = '#25a855';
+    // Main stem
+    let d = `M${cx} ${h} Q${cx-4} ${h*0.6} ${cx} ${h*0.1}`;
+    const stem = document.createElementNS('http://www.w3.org/2000/svg','path');
+    stem.setAttribute('d', d);
+    stem.setAttribute('stroke', g1);
+    stem.setAttribute('stroke-width', '3.5');
+    stem.setAttribute('fill', 'none');
+    stem.setAttribute('stroke-linecap', 'round');
+    svg.appendChild(stem);
+    // Branches — alternating left/right
+    const numBranches = Math.floor(4 + Math.random()*3);
+    for(let i=0;i<numBranches;i++){
+      const t = 0.15 + (i/(numBranches-1))*0.7;
+      const bx = cx + (cx-4)*(-1 + 2*(t)); // slight curve following stem
+      const by = h - (h*0.85)*t;
+      const side = i%2===0 ? -1 : 1;
+      const bLen = (8 + Math.random()*14) * (1-t*0.4);
+      const br = document.createElementNS('http://www.w3.org/2000/svg','path');
+      br.setAttribute('d', `M${cx} ${by} Q${cx+side*bLen*0.6} ${by-bLen*0.3} ${cx+side*bLen} ${by-bLen*0.8}`);
+      br.setAttribute('stroke', g2);
+      br.setAttribute('stroke-width', '2');
+      br.setAttribute('fill', 'none');
+      br.setAttribute('stroke-linecap', 'round');
+      svg.appendChild(br);
+      // Sub-branches on larger branches
+      if(bLen > 14) {
+        const sb = document.createElementNS('http://www.w3.org/2000/svg','path');
+        const mx = cx+side*bLen*0.5, my = by-bLen*0.25;
+        sb.setAttribute('d',`M${mx} ${my} Q${mx+side*6} ${my-8} ${mx+side*10} ${my-4}`);
+        sb.setAttribute('stroke', g2); sb.setAttribute('stroke-width','1.5');
+        sb.setAttribute('fill','none'); sb.setAttribute('stroke-linecap','round');
+        svg.appendChild(sb);
+      }
+    }
+    floor.appendChild(svg);
+  }
+
+  // Type B: wide-leaf kelp (寬葉海草) — wavy broad blade
+  function makeKelpWeed(x, h, delay, dur) {
+    const w = Math.round(h * 0.55);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('width', w);
+    svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.classList.add('weed');
+    svg.style.left = x;
+    svg.style.animationName = Math.random()>.5 ? 'weedSway' : 'weedSway2';
+    svg.style.animationDuration = dur + 's';
+    svg.style.animationDelay = delay + 's';
+    svg.style.animationTimingFunction = 'ease-in-out';
+    svg.style.animationIterationCount = 'infinite';
+    const cx = w/2;
+    const col1='#1e8c3a', col2='#27ae60', col3='#2ecc71';
+    // Wavy leaf blade shape
+    const leaf = document.createElementNS('http://www.w3.org/2000/svg','path');
+    const lw = w*0.38;
+    leaf.setAttribute('d', 
+      `M${cx} ${h}
+       C${cx-lw} ${h*0.75} ${cx+lw*1.2} ${h*0.55} ${cx-lw*0.8} ${h*0.35}
+       C${cx+lw*0.5} ${h*0.18} ${cx-lw*0.3} ${h*0.08} ${cx} ${0}
+       C${cx+lw*0.3} ${h*0.08} ${cx+lw*0.8} ${h*0.18} ${cx-lw*0.5+lw*0.3} ${h*0.38}
+       C${cx+lw*1.0} ${h*0.55} ${cx-lw*0.8} ${h*0.75} ${cx} ${h} Z`
+    );
+    leaf.setAttribute('fill', col2);
+    leaf.setAttribute('opacity','0.92');
+    svg.appendChild(leaf);
+    // Midrib
+    const rib = document.createElementNS('http://www.w3.org/2000/svg','path');
+    rib.setAttribute('d',`M${cx} ${h} C${cx-4} ${h*0.6} ${cx+3} ${h*0.3} ${cx} 0`);
+    rib.setAttribute('stroke', col1);
+    rib.setAttribute('stroke-width','2');
+    rib.setAttribute('fill','none');
+    svg.appendChild(rib);
+    // Highlight sheen
+    const shine = document.createElementNS('http://www.w3.org/2000/svg','path');
+    shine.setAttribute('d',`M${cx+2} ${h*0.8} C${cx+lw*0.3} ${h*0.6} ${cx-lw*0.1} ${h*0.4} ${cx+lw*0.1} ${h*0.15}`);
+    shine.setAttribute('stroke',col3);
+    shine.setAttribute('stroke-width','2.5');
+    shine.setAttribute('fill','none');
+    shine.setAttribute('opacity','0.55');
+    svg.appendChild(shine);
+    floor.appendChild(svg);
+  }
+
+  // ── CORAL shapes ──────────────────────────────────────────────
+  function makeCoral(x, h, color) {
+    const w = h * 0.9;
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    svg.setAttribute('width', w); svg.setAttribute('height', h);
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    svg.classList.add('weed');
+    svg.style.left = x;
+    svg.style.animationName = 'weedSway';
+    svg.style.animationDuration = (4+Math.random()*3)+'s';
+    svg.style.animationDelay = (Math.random()*4)+'s';
+    svg.style.animationTimingFunction = 'ease-in-out';
+    svg.style.animationIterationCount = 'infinite';
+    const cx = w/2, type = Math.floor(Math.random()*3);
+    if(type===0) {
+      // branching coral — Y shapes
+      const g = document.createElementNS('http://www.w3.org/2000/svg','g');
+      function branch(x1,y1,x2,y2,depth){
+        const p=document.createElementNS('http://www.w3.org/2000/svg','line');
+        p.setAttribute('x1',x1);p.setAttribute('y1',y1);p.setAttribute('x2',x2);p.setAttribute('y2',y2);
+        p.setAttribute('stroke',color);p.setAttribute('stroke-width',Math.max(1,depth*1.5));
+        p.setAttribute('stroke-linecap','round');g.appendChild(p);
+        if(depth>0){const len=Math.sqrt((x2-x1)**2+(y2-y1)**2)*0.65;const ang=Math.atan2(y2-y1,x2-x1);
+          branch(x2,y2,x2+Math.cos(ang-0.6)*len,y2+Math.sin(ang-0.6)*len,depth-1);
+          branch(x2,y2,x2+Math.cos(ang+0.6)*len,y2+Math.sin(ang+0.6)*len,depth-1);}
+      }
+      branch(cx,h,cx,h*0.4,3); svg.appendChild(g);
+    } else if(type===1) {
+      // fan coral — semi-circle fan
+      for(let a=-70;a<=70;a+=12){
+        const rad=a*Math.PI/180, len=h*0.85;
+        const p=document.createElementNS('http://www.w3.org/2000/svg','line');
+        p.setAttribute('x1',cx);p.setAttribute('y1',h);
+        p.setAttribute('x2',cx+Math.sin(rad)*len);p.setAttribute('y2',h-Math.cos(rad)*len);
+        p.setAttribute('stroke',color);p.setAttribute('stroke-width','2');
+        p.setAttribute('stroke-linecap','round');p.setAttribute('opacity','0.85');svg.appendChild(p);
+      }
+      // connect with arcs
+      for(let i=0;i<3;i++){
+        const r=(h*0.25)*(i+1)*0.35;
+        const arc=document.createElementNS('http://www.w3.org/2000/svg','path');
+        arc.setAttribute('d',`M${cx-r*1.8} ${h-r*1.1} Q${cx} ${h-r*1.5} ${cx+r*1.8} ${h-r*1.1}`);
+        arc.setAttribute('stroke',color);arc.setAttribute('stroke-width','1.5');
+        arc.setAttribute('fill','none');arc.setAttribute('opacity','0.6');svg.appendChild(arc);
+      }
+    } else {
+      // bubble/round coral — stacked circles
+      const colors2=[color, color+'cc', color+'99'];
+      [[cx,h*0.55,h*0.22],[cx-h*0.18,h*0.7,h*0.18],[cx+h*0.15,h*0.68,h*0.16],
+       [cx,h*0.35,h*0.15],[cx-h*0.1,h*0.5,h*0.12]].forEach(([bx,by,r],j)=>{
+        const c=document.createElementNS('http://www.w3.org/2000/svg','circle');
+        c.setAttribute('cx',bx);c.setAttribute('cy',by);c.setAttribute('r',r);
+        c.setAttribute('fill',colors2[j%3]);c.setAttribute('opacity','0.88');svg.appendChild(c);
+        const shine=document.createElementNS('http://www.w3.org/2000/svg','circle');
+        shine.setAttribute('cx',bx-r*0.3);shine.setAttribute('cy',by-r*0.3);shine.setAttribute('r',r*0.25);
+        shine.setAttribute('fill','white');shine.setAttribute('opacity','0.3');svg.appendChild(shine);
+      });
+    }
+    floor.appendChild(svg);
+  }
+
+  // ── JELLYFISH (decorative, floating above floor) ──
+  function makeJellyfish(x, forceSize, forceColor) {
+    const div = document.createElement('div');
+    const size = forceSize || (18 + Math.random()*34);
+    const palettes = [
+      ['#ff9eb5','#ff6b9d'],['#c77dff','#9b5de5'],['#74c0fc','#4dabf7'],
+      ['#ff6b6b','#fa5252'],['#a9def9','#74b9ff'],['#ffd6a5','#ffb347'],
+      ['#caffbf','#52b788'],['#e0c3fc','#b197fc']
+    ];
+    const pal = forceColor ? [forceColor,forceColor] : palettes[Math.floor(Math.random()*palettes.length)];
+    const col = pal[0], col2 = pal[1];
+    const bottom = 65 + Math.random()*200;
+    div.style.cssText = `position:absolute;bottom:${bottom}px;left:${x};pointer-events:none;`+
+      `animation:jellyFloat ${3.5+Math.random()*4}s ease-in-out infinite;`+
+      `animation-delay:${(Math.random()*6).toFixed(1)}s;`;
+    // tentacle count varies
+    const tentacles = 5 + Math.floor(Math.random()*4);
+    let tentSVG = '';
+    for(let i=0;i<tentacles;i++){
+      const tx = 4 + (i/(tentacles-1))*32;
+      const wavex = (i%2===0?-1:1)*(3+Math.random()*5);
+      tentSVG += `<path d="M${tx} 30 Q${tx+wavex} ${38+Math.random()*8} ${tx-wavex*0.5} ${48+Math.random()*10}" stroke="${col2}" stroke-width="${0.8+Math.random()*1.2}" fill="none" opacity="${0.55+Math.random()*0.3}"/>`;
+    }
+    div.innerHTML = `<svg width="${size}" height="${size*1.6}" viewBox="0 0 40 64">
+      <defs>
+        <radialGradient id="jg${Math.round(Math.random()*9999)}" cx="40%" cy="35%">
+          <stop offset="0%" stop-color="white" stop-opacity="0.5"/>
+          <stop offset="100%" stop-color="${col}" stop-opacity="0.8"/>
+        </radialGradient>
+      </defs>
+      <ellipse cx="20" cy="17" rx="18" ry="15" fill="${col}" opacity="0.72"/>
+      <ellipse cx="20" cy="17" rx="14" ry="11" fill="white" opacity="0.18"/>
+      <ellipse cx="14" cy="13" rx="5"  ry="3"  fill="white" opacity="0.25"/>
+      <path d="M2 22 Q20 28 38 22" stroke="${col}" stroke-width="2" fill="${col}" opacity="0.35"/>
+      ${tentSVG}
+    </svg>`;
+    floor.appendChild(div);
+  }
+
+  // ── CSS for jellyfish float ──
+  // ── ROCK CLUSTERS with seaweed on top ──
+  function makeRockCluster(x, side) {
+    const floor = document.getElementById('floor');
+    const floorH = 110; // floor div height in px
+    const rc1='#7a6448', rc2='#9a8060', rc3='#5e4a30', rc4='#b8966a';
+
+    // Each rock cluster = 1 SVG with irregular polygon rocks
+    // SVG is 160x55, rocks fill bottom portion, sit flush at y=55
+    const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
+    const scale = 0.8 + Math.random()*0.5;
+    const svgW = Math.round(160*scale), svgH = Math.round(55*scale);
+    svg.setAttribute('width', svgW);
+    svg.setAttribute('height', svgH);
+    // viewBox: content sits in 0..160 x 0..55, rocks touch y=55
+    svg.setAttribute('viewBox','0 0 160 55');
+    svg.setAttribute('preserveAspectRatio','xMidYMax meet');
+    svg.style.cssText = 'display:block;';
+
+    // 3 irregular polygon rocks — jagged edges, all max-y=55
+    svg.innerHTML = `
+      <polygon points="2,55 0,42 5,30 15,22 30,18 46,20 57,28 62,40 60,55" fill="${rc3}"/>
+      <polygon points="8,55 6,44 10,33 22,25 36,22 50,24 58,32 60,44 58,55" fill="${rc1}"/>
+      <polygon points="16,48 20,30 32,24 44,26 52,34 48,48" fill="${rc2}" opacity="0.7"/>
+      <polygon points="98,55 95,40 98,28 110,20 128,16 146,19 155,28 158,42 156,55" fill="${rc3}"/>
+      <polygon points="102,55 100,42 104,30 115,23 130,20 148,22 154,32 156,44 154,55" fill="${rc1}"/>
+      <polygon points="108,46 112,28 124,22 138,24 148,33 144,46" fill="${rc2}" opacity="0.65"/>
+      <polygon points="66,55 63,44 66,36 74,28 88,25 100,29 104,40 102,55" fill="${rc3}" opacity="0.9"/>
+      <polygon points="68,55 66,46 70,38 78,32 90,30 100,34 100,46 98,55" fill="${rc1}" opacity="0.8"/>
+    `;
+
+    // Place SVG inside floor div, absolutely at bottom
+    const wrapper = document.createElement('div');
+    wrapper.style.cssText = `position:absolute;bottom:0;left:${x};pointer-events:none;z-index:4;line-height:0;`;
+    wrapper.appendChild(svg);
+    floor.appendChild(wrapper);
+
+    // Mini weeds/corals growing from the rocks — also inside floor
+    const numW = 2 + Math.floor(Math.random()*3);
+    for(let i=0;i<numW;i++){
+      const wh = 20+Math.random()*30;
+      const baseX = parseFloat(x);
+      const offsetX = (i - (numW-1)/2) * 3.5;
+      const wx = `${baseX + offsetX}%`;
+      const wd = (Math.random()*3).toFixed(1);
+      const wdur = (2.5+Math.random()*2.5).toFixed(1);
+      const r = Math.random();
+      if(r<0.4) makeFernWeed(wx,wh,wd,wdur);
+      else if(r<0.72) makeKelpWeed(wx,wh,wd,wdur);
+      else makeCoral(wx,wh,['#ff6b9d','#ff9f43','#a29bfe','#74b9ff','#55efc4','#e17055'][Math.floor(Math.random()*6)]);
+    }
+  }
+
+    if(!document.getElementById('sea-creature-css')){
+    const st=document.createElement('style');st.id='sea-creature-css';
+    st.textContent=`@keyframes jellyFloat{0%,100%{transform:translateY(0) scaleX(1)}40%{transform:translateY(-14px) scaleX(0.9)}70%{transform:translateY(-6px) scaleX(1.05)}}`;
+    document.head.appendChild(st);
+  }
+
+  // ── Place dense varied flora ──
+  // Mix of thin fern, wide kelp, coral, with varied heights
+  const plantDefs = [
+    // [positionPct, type, heightScale, isBold]
+    // type: 0=fern,1=kelp,2=coral
+  ];
+  // Generate dense positions
+  for(let i=0;i<52;i++){
+    const pct = (i/51)*98 + (Math.random()*2-1);
+    plantDefs.push([Math.max(0.5,Math.min(99,pct)), Math.floor(Math.random()*3), 1]);
+  }
+  // Add extra-bold wide kelp every ~8 positions
+  [5,14,22,31,40,49,60,69,78,88,95].forEach(p => {
+    plantDefs.push([p + Math.random()*3-1.5, 1, 1.8]); // bold kelp
+  });
+
+  plantDefs.forEach(([pct, type, scale]) => {
+    const baseH = 32 + Math.random()*50;
+    const h = baseH * scale;
+    const delay = (Math.random()*5).toFixed(1);
+    const dur   = (2.8+Math.random()*3.5).toFixed(1);
+    const x = pct + '%';
+    const coralColors = ['#ff6b9d','#ff9f43','#ffeaa7','#a29bfe','#fd79a8','#e17055','#74b9ff','#55efc4','#ff6348','#eccc68'];
+    if(type===0)      makeFernWeed(x, h, delay, dur);
+    else if(type===1) makeKelpWeed(x, h, delay, dur);
+    else              makeCoral(x, h, coralColors[Math.floor(Math.random()*coralColors.length)]);
+  });
+
+  // Rock clusters left and right sides
+  makeRockCluster('1%', 'left');
+  makeRockCluster('6%', 'left');
+  makeRockCluster('88%', 'right');
+  makeRockCluster('93%', 'right');
+  // A couple in the middle too
+  makeRockCluster('38%', 'mid');
+  makeRockCluster('62%', 'mid');
+
+  // Jellyfish — evenly spread across full width, varied sizes/colors
+  const jellyData = [
+    [2,'#ff9eb5',16],[9,'#c77dff',28],[16,'#74c0fc',20],[23,'#ffd6a5',32],
+    [30,'#a9def9',18],[37,'#caffbf',26],[44,'#e0c3fc',22],[51,'#ff6b6b',14],
+    [58,'#74b9ff',30],[65,'#ffb347',24],[72,'#b197fc',36],[79,'#52b788',20],
+    [86,'#fa5252',18],[93,'#4dabf7',28],[6,'#eccc68',14],[42,'#55efc4',22],
+    [77,'#fd79a8',16]
+  ];
+  jellyData.forEach(([p,col,sz]) => makeJellyfish(p+'%', sz, col));
+}
+
+function spawnBubble(parent, init=false){
+  const b=document.createElement('div'); b.className='bubble';
+  const sz=4+Math.random()*16;
+  b.style.width=sz+'px'; b.style.height=sz+'px';
+  b.style.left=(Math.random()*100)+'%';
+  b.style.bottom=init?(Math.random()*100)+'%':'0';
+  const dur=6+Math.random()*10;
+  b.style.animationDuration=dur+'s';
+  b.style.animationDelay=(Math.random()*8)+'s';
+  parent.appendChild(b);
+  setTimeout(()=>{ b.remove(); spawnBubble(parent); }, (dur+8)*1000);
+}
+
+// ─── LEGEND ──────────────────────────────────────────────────────────────
+function buildLegend(){
+  const leg=document.getElementById('legend');
+  CATEGORIES.forEach(c=>{
+    const d=document.createElement('div'); d.className='cat-badge';
+    d.innerHTML=`<div class="dot" style="background:${c.color}"></div>${c.emoji} ${c.id} ${c.label}`;
+    leg.appendChild(d);
+  });
+}
+
+// ─── FISH SPAWNING ────────────────────────────────────────────────────────
+function spawnFish(bookData){
+  const cat = CATEGORIES.find(c=>c.id===bookData.cat);
+
+  // Wrapper keeps position; label lives here (never flipped)
+  const wrapper = document.createElement('div');
+  wrapper.className='fish';
+  wrapper.style.position='absolute';
+
+  // Inner element holds the SVG fish body (this gets flipped)
+  const body = document.createElement('div');
+  body.className='fish-body';
+  body.style.display='inline-block';
+
+  const shapeIdx = Math.floor(Math.random()*FISH_SHAPES.length);
+  const scale = 0.85 + Math.random()*0.4;
+  body.innerHTML = FISH_SHAPES[shapeIdx](cat.color, scale);
+
+  // label on wrapper — never affected by body flip
+  const lbl=document.createElement('div'); lbl.className='fish-label';
+  lbl.textContent=bookData.title;
+
+  wrapper.appendChild(body);
+  wrapper.appendChild(lbl);
+
+  // position: random in ocean area (avoid HUD and floor)
+  const topMin=80, topMax=window.innerHeight-160;
+  const leftMin=60, leftMax=window.innerWidth-180;
+  const top = topMin + Math.random()*(topMax-topMin);
+  const left = leftMin + Math.random()*(leftMax-leftMin);
+  wrapper.style.top=top+'px';
+  wrapper.style.left=left+'px';
+
+  // FISH_SHAPES: nose LEFT, tail RIGHT → fish naturally swims LEFT
+  // dir=+1 → swims right → flip body: scaleX(-1)
+  // dir=-1 → swims left  → no flip
+  const dir = Math.random()>.5?1:-1;
+  if(dir>0) body.style.transform='scaleX(-1)';
+
+  wrapper.addEventListener('click',()=>onFishClick(wrapper, bookData));
+
+  document.body.appendChild(wrapper);
+
+  // Fish swims across screen continuously in dir direction
+  // Start: positioned at random spot; swim to off-screen edge, wrap to other side
+  const swimDur = 18 + Math.random()*16; // seconds to cross screen
+  const W = window.innerWidth;
+  const startX = parseFloat(wrapper.style.left);
+
+  if(dir > 0) {
+    // swim RIGHT: from current pos → off right → reset to off left → repeat
+    const toRight = W + 160 - startX;
+    const fromLeft = -(startX + 160);
+    wrapper.animate([
+      {transform: 'translateX(0px)'},
+      {transform: `translateX(${toRight}px)`}
+    ],{
+      duration: swimDur * 1000,
+      iterations: Infinity,
+      easing: 'linear'
+    });
+  } else {
+    // swim LEFT: from current pos → off left → reset to off right → repeat
+    const toLeft = -(startX + 160);
+    wrapper.animate([
+      {transform: 'translateX(0px)'},
+      {transform: `translateX(${toLeft}px)`}
+    ],{
+      duration: swimDur * 1000,
+      iterations: Infinity,
+      easing: 'linear'
+    });
+  }
+  // Gentle vertical bob layered on top via CSS animation
+  wrapper.style.animation = `fishBob ${3+Math.random()*3}s ease-in-out infinite`;
+  wrapper.style.animationDelay = `-${Math.random()*3}s`;
+
+  activeFish.push({el: wrapper, bookData});
+  return wrapper;
+}
+
+// ─── QUESTION LOGIC ──────────────────────────────────────────────────────
+function onFishClick(el, bookData){
+  if(!gameRunning || currentFish || toastShowing) return;
+  currentFish = {el, bookData};
+
+  // pick 3 wrong options + 1 correct
+  const correct = CATEGORIES.find(c=>c.id===bookData.cat);
+  let others = CATEGORIES.filter(c=>c.id!==bookData.cat);
+  others = shuffle(others).slice(0,3);
+  const opts = shuffle([correct, ...others]);
+
+  document.getElementById('qbook').textContent = '《' + bookData.title + '》';
+  const optsDiv = document.getElementById('qopts');
+  optsDiv.innerHTML='';
+  opts.forEach(o=>{
+    const btn=document.createElement('button');
+    btn.className='opt-btn';
+    btn.innerHTML=`${o.emoji} ${o.id}<br>${o.label}`;
+    btn.style.borderColor = o.color+'66';
+    btn.addEventListener('click',()=>onAnswer(btn, o.id===bookData.cat, correct, o));
+    optsDiv.appendChild(btn);
+  });
+
+  document.getElementById('question-card').style.display='block';
+}
+
+function onAnswer(btn, isCorrect, correctCat, chosen){
+  document.querySelectorAll('.opt-btn').forEach(b=>b.disabled=true);
+  // Hide question card IMMEDIATELY so toast never overlaps it
+  document.getElementById('question-card').style.display='none';
+  if(isCorrect){
+    btn.classList.add('correct');
+    combo++; score += 10 + (combo>1?(combo-1)*5:0);
+    answered++;
+    showToast('✅','答對了！', `${correctCat.emoji} ${correctCat.id} — ${correctCat.label}（+${10+(combo>1?(combo-1)*5:0)}分）`);
+    setTimeout(()=>{
+      removeFish(currentFish.el);
+      currentFish=null;
+      caught++;
+      updateHUD();
+      checkWin();
+    },400);
+  } else {
+    btn.classList.add('wrong');
+    combo=0; lives--;
+    showToast('❌','答錯了！', `正確答案：${correctCat.emoji} ${correctCat.id} — ${correctCat.label}`);
+    setTimeout(()=>{
+      currentFish=null;
+      updateHUD();
+      if(lives<=0) endGame();
+    },400);
+  }
+  updateHUD();
+}
+
+function closeQuestion(){
+  document.getElementById('question-card').style.display='none';
+  currentFish=null;
+}
+
+function removeFish(el){
+  el.classList.add('caught');
+  setTimeout(()=>el.remove(),500);
+  activeFish = activeFish.filter(f=>f.el!==el);
+}
+
+// ─── HUD ─────────────────────────────────────────────────────────────────
+function updateHUD(){
+  document.getElementById('score-val').textContent=score;
+  document.getElementById('combo-val').textContent=combo;
+  document.getElementById('lives-val').textContent='❤️'.repeat(Math.max(0,lives));
+  const pct = totalBooks>0?(caught/totalBooks*100):0;
+  document.getElementById('prog-fill').style.width=pct+'%';
+  document.getElementById('prog-label').textContent=`已捕 ${caught} / ${totalBooks} 本`;
+}
+
+function updateTimer(){
+  document.getElementById('time-val').textContent=timeLeft;
+}
+
+// ─── TOAST ───────────────────────────────────────────────────────────────
+let toastTimer=null;
+let toastShowing=false;
+function showToast(icon, msg, hint){
+  document.getElementById('t-icon').textContent=icon;
+  document.getElementById('t-msg').textContent=msg;
+  document.getElementById('t-hint').textContent=hint||'';
+  const t=document.getElementById('toast'); t.classList.add('show');
+  toastShowing=true;
+  // Block ALL clicks on the game ocean during toast
+  const blocker = document.getElementById('click-blocker');
+  if(blocker) blocker.style.display='block';
+  if(toastTimer) clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{
+    t.classList.remove('show');
+    toastShowing=false;
+    if(blocker) blocker.style.display='none';
+  },1000);
+}
+
+// ─── GAME FLOW ────────────────────────────────────────────────────────────
+function startGame(){
+  score=0; combo=0; lives=3; timeLeft=60; caught=0; answered=0;
+  activeFish=[];
+  document.querySelectorAll('.fish').forEach(f=>f.remove());
+  document.querySelectorAll('.chest').forEach(c=>c.remove());
+  closeQuestion();
+  document.getElementById('gameover').style.display='none';
+  document.getElementById('toast').classList.remove('show');
+  gameRunning=true;
+
+  // pick 15 random books
+  const pool = shuffle([...BOOKS]).slice(0,25);
+  totalBooks=pool.length;
+  pool.forEach((b,i)=>setTimeout(()=>{ if(gameRunning) spawnFish(b); }, i*1200));
+  spawnChests();
+
+  updateHUD();
+  updateTimer();
+
+  timer=setInterval(()=>{
+    if(!gameRunning) return;
+    timeLeft--;
+    updateTimer();
+    if(timeLeft<=0) endGame();
+  },1000);
+}
+
+function checkWin(){
+  if(caught>=totalBooks){ endGame(true); }
+}
+
+function endGame(win=false){
+  gameRunning=false;
+  clearInterval(timer);
+  closeQuestion();
+  document.getElementById('go-score').textContent=`🏆 最終得分：${score} 分`;
+  document.getElementById('go-caught').textContent=`🐠 成功分類：${caught} 本 / ${totalBooks} 本`;
+  document.getElementById('gameover').style.display='flex';
+}
+
+function restartGame(){ startGame(); }
+
+// ─── UTIL ─────────────────────────────────────────────────────────────────
+function shuffle(arr){ return [...arr].sort(()=>Math.random()-.5); }
+
+// ─── INIT ─────────────────────────────────────────────────────────────────
+buildOcean();
+buildLegend();
+runIntroSequence();
+
+// ─── TYPEWRITER INTRO ────────────────────────────────────────────────────
+function runIntroSequence() {
+  const title    = document.getElementById('intro-title');
+  const subtitle = document.getElementById('intro-subtitle');
+  const rules    = document.getElementById('intro-rules');
+  const btn      = document.getElementById('start-btn');
+  const text  = '🐠 海底圖書館';
+  const chars = [...text];
+  chars.forEach((ch, i) => {
+    const span = document.createElement('span');
+    span.className = 'title-char';
+    span.textContent = ch === ' ' ? ' ' : ch;
+    span.style.animationDelay = (i * 0.13) + 's';
+    title.appendChild(span);
+  });
+  const totalDelay = chars.length * 130 + 350;
+  setTimeout(() => {
+    subtitle.style.opacity = '1';
+    setTimeout(() => {
+      rules.classList.add('visible');
+      setTimeout(() => btn.classList.add('visible'), 500);
+    }, 300);
+  }, totalDelay);
+}
+
+// ─── LAUNCH — POV goggle transition ─────────────────────────────────────
+function launchGame(){
+  const intro       = document.getElementById('intro');
+  const povAnim     = document.getElementById('pov-anim');
+  const goggleFrame = document.getElementById('goggle-frame');
+  const blackoutDiv = document.getElementById('goggle-blackout-div');
+  const reveal      = document.getElementById('ocean-reveal');
+  const cur         = document.getElementById('cursor');
+  const panel       = document.getElementById('intro-panel');
+
+  // ── PHASE 1 (0→600ms): fade out intro panel ──────────────────────────
+  panel.style.transition = 'opacity .5s ease';
+  panel.style.opacity    = '0';
+
+  // ── PHASE 2 (600ms→3200ms): goggle slowly zooms in from tiny ─────────
+  setTimeout(() => {
+    // Set initial state (tiny, invisible)
+    [povAnim, goggleFrame].forEach(el => {
+      el.style.display         = 'block';
+      el.style.opacity         = '0';
+      el.style.transform       = 'scale(2.8)';
+      el.style.transformOrigin = '50% 50%';
+      el.style.transition      = 'none';
+    });
+
+    // Double rAF guarantees browser has painted the initial state
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        [povAnim, goggleFrame].forEach(el => {
+          el.style.transition = 'transform 3s cubic-bezier(.25,.46,.45,.94), opacity 1s ease';
+          el.style.transform  = 'scale(1)';
+          el.style.opacity    = '1';
+        });
+        // Intro bg fades out as goggle grows
+        intro.style.transition = 'opacity 1.2s ease';
+        intro.style.opacity    = '0';
+      });
+    });
+  }, 600);
+
+  // ── PHASE 3 (3200ms→3400ms): hold on POV for 2 seconds ───────────────
+  // (nothing — intentional 2s pause to enjoy the underwater view)
+
+  // ── PHASE 4 (5400ms→6400ms): black dissolves in ───────────────────────
+  setTimeout(() => {
+    blackoutDiv.style.display    = 'block';
+    blackoutDiv.style.opacity    = '0';
+    blackoutDiv.style.transition = 'opacity 1s ease';
+    void blackoutDiv.offsetWidth;
+    blackoutDiv.style.opacity    = '1';
+  }, 5400);
+
+  // ── PHASE 5 (6400ms): hide everything, start game ─────────────────────
+  setTimeout(() => {
+    povAnim.style.display     = 'none';
+    goggleFrame.style.display = 'none';
+    intro.style.display       = 'none';
+    blackoutDiv.style.display = 'none';
+    blackoutDiv.style.opacity = '0';
+
+    cur.classList.remove('sub');
+    cur.classList.add('diver');
+
+    reveal.style.opacity    = '1';
+    reveal.style.visibility = 'visible';
+    startGame();
+  }, 6550);
+
+  // ── PHASE 6 (6600ms→8200ms): ocean dissolves in from black ────────────
+  setTimeout(() => {
+    reveal.style.transition = 'opacity 1.6s ease';
+    reveal.style.opacity    = '0';
+    setTimeout(() => {
+      reveal.style.visibility = 'hidden';
+      reveal.style.transition = '';
+    }, 1700);
+  }, 6800);
+}
+
+// ─── CUSTOM CURSOR ────────────────────────────────────────────────────────
+const cursorEl = document.getElementById('cursor');
+document.addEventListener('mousemove', e => {
+  cursorEl.style.left = e.clientX + 'px';
+  cursorEl.style.top  = e.clientY + 'px';
+});
+document.addEventListener('mousedown', () => cursorEl.classList.add('clicking'));
+document.addEventListener('mouseup',   () => cursorEl.classList.remove('clicking'));
+
+// ─── TREASURE CHESTS ─────────────────────────────────────────────────────
+const CHEST_REWARDS = [
+  { type:'bonus', icon:'💰', text:'+20分 寶藏！',    score: 20 },
+  { type:'bonus', icon:'💎', text:'+30分 寶石！',    score: 30 },
+  { type:'bonus', icon:'⭐', text:'+15分 星星！',    score: 15 },
+  { type:'bonus', icon:'🪙', text:'+25分 金幣！',    score: 25 },
+  { type:'time',  icon:'⏳', text:'+10秒 沙漏！',   time: 10  },
+  { type:'time',  icon:'🕰️', text:'+15秒 時光！',   time: 15  },
+  { type:'life',  icon:'❤️', text:'多一條命！',       life: 1   },
+  { type:'book',  icon:'📖', text:'神秘書籍出現！',   book: true },
+  { type:'book',  icon:'📚', text:'雙倍書籍出現！',   book: 2   },
+];
+
+// chest types: 'closed'=normal, 'open'=pre-opened with treasure, 'book'=contains book
+function spawnChests() {
+  const floor = document.getElementById('floor');
+  // 8 total positions, mix of types
+  const allPos = [5, 14, 24, 35, 46, 58, 70, 82];
+  const shuffled = shuffle(allPos);
+
+  const chestConfigs = [
+    { kind:'closed' }, { kind:'closed' }, { kind:'closed' },
+    { kind:'open'   }, { kind:'open'   },           // pre-opened w/ treasure visible
+    { kind:'book'   }, { kind:'book'   },            // books inside
+    { kind:'closed' },
+  ];
+
+  shuffled.forEach((pct, i) => {
+    const cfg = chestConfigs[i] || { kind:'closed' };
+    // stagger appearance: some appear immediately (pre-opened), some later
+    const delay = cfg.kind === 'open' ? 500 + i * 300 : 2000 + i * 1800;
+    setTimeout(() => {
+      if (!gameRunning && cfg.kind !== 'open') return;
+      const chest = document.createElement('div');
+      chest.className = 'chest';
+      chest.dataset.kind = cfg.kind;
+      chest.style.left = pct + '%';
+      chest.style.bottom = (6 + Math.random() * 18) + 'px';
+      chest.style.animationDelay = (Math.random() * 2) + 's';
+      chest.innerHTML = buildChestSVG(cfg.kind);
+      if (cfg.kind !== 'open') {
+        chest.addEventListener('click', () => onChestClick(chest, cfg.kind));
+      }
+      floor.appendChild(chest);
+    }, delay);
+  });
+}
+
+function buildChestSVG(kind = 'closed') {
+  const isOpen = kind === 'open';
+  const isBook = kind === 'book';
+
+  // base body colour slightly different per type
+  const bodyCol  = isBook ? '#4a2800' : '#7c4a1e';
+  const lidCol   = isBook ? '#6b3a0a' : '#9b5e2a';
+  const glowCol  = isOpen ? 'rgba(245,197,24,.55)' : isBook ? 'rgba(168,230,240,.4)' : 'none';
+
+  let interior = '';
+  if (isOpen) {
+    interior = `
+      <ellipse cx="26" cy="20" rx="18" ry="7" fill="#c8a000" opacity=".9"/>
+      <text x="17" y="18" font-size="9">💎</text>
+      <text x="28" y="16" font-size="7">🪙</text>
+      <text x="22" y="25" font-size="8">✨</text>`;
+  } else if (isBook) {
+    interior = `
+      <rect x="14" y="14" width="9" height="12" rx="1" fill="#e63946"/>
+      <rect x="24" y="15" width="9" height="11" rx="1" fill="#457b9d"/>
+      <rect x="16" y="13" width="7" height="2" rx="1" fill="#c1121f"/>
+      <rect x="25" y="14" width="6" height="2" rx="1" fill="#1d3557"/>`;
+  }
+
+  const lidPath = isOpen || isBook
+    ? `<path d="M4 18 Q4 2 26 2 Q48 2 48 18 Z" fill="${lidCol}"/>
+       <path d="M4 18 Q4 2 26 2 Q48 2 48 18 Z" fill="none" stroke="#c8a96e" stroke-width="2"/>`
+    : `<path d="M4 22 Q4 10 26 10 Q48 10 48 22 Z" fill="${lidCol}"/>
+       <path d="M4 22 Q4 10 26 10 Q48 10 48 22 Z" fill="none" stroke="#c8a96e" stroke-width="2"/>`;
+
+  const glowEl = isOpen || isBook
+    ? `<ellipse cx="26" cy="20" rx="20" ry="8" fill="${glowCol}" filter="blur(3px)"/>`
+    : '';
+
+  const sparkle = !isOpen && !isBook ? `<text x="36" y="10" font-size="10" opacity=".9">✨</text>` : '';
+  const bookTag = isBook ? `<text x="2" y="10" font-size="9">📖</text>` : '';
+  const openTag = isOpen ? `<text x="2" y="10" font-size="8">🔓</text>` : '';
+
+  return `<svg width="52" height="46" viewBox="0 0 52 46" xmlns="http://www.w3.org/2000/svg">
+    ${glowEl}
+    <rect x="4" y="20" width="44" height="24" rx="4" fill="${bodyCol}"/>
+    <rect x="4" y="20" width="44" height="24" rx="4" fill="none" stroke="#c8a96e" stroke-width="2"/>
+    ${lidPath}
+    ${interior}
+    <rect x="4" y="20" width="44" height="5" fill="#5a3010" opacity=".4"/>
+    ${!isOpen && !isBook ? `<rect x="21" y="25" width="10" height="8" rx="2" fill="#c8a96e"/>
+    <circle cx="26" cy="28" r="2.5" fill="${bodyCol}"/>` : ''}
+    <circle cx="10" cy="31" r="2" fill="#c8a96e"/>
+    <circle cx="42" cy="31" r="2" fill="#c8a96e"/>
+    <circle cx="10" cy="38" r="2" fill="#c8a96e"/>
+    <circle cx="42" cy="38" r="2" fill="#c8a96e"/>
+    ${sparkle}${bookTag}${openTag}
+  </svg>`;
+}
+
+function onChestClick(chest, kind) {
+  if (!gameRunning) return;
+  chest.classList.add('opening');
+  const rect = chest.getBoundingClientRect();
+
+  let icon, text;
+  if (kind === 'book') {
+    // book chest — spawn fish(es)
+    icon = '📖'; text = '發現書本！';
+    const bonus = BOOKS[Math.floor(Math.random() * BOOKS.length)];
+    setTimeout(() => { if (gameRunning) { spawnFish(bonus); totalBooks++; updateHUD(); } }, 400);
+    // 30% chance second book
+    if (Math.random() < 0.3) {
+      const bonus2 = BOOKS[Math.floor(Math.random() * BOOKS.length)];
+      setTimeout(() => { if (gameRunning) { spawnFish(bonus2); totalBooks++; updateHUD(); } }, 800);
+      text = '發現兩本書！';
+    }
+  } else {
+    const reward = CHEST_REWARDS[Math.floor(Math.random() * (CHEST_REWARDS.length - 2))]; // skip book rewards for closed chests
+    icon = reward.icon; text = reward.text;
+    if (reward.type === 'bonus')      score += reward.score;
+    else if (reward.type === 'time') { timeLeft = Math.min(timeLeft + reward.time, 120); updateTimer(); }
+    else if (reward.type === 'life')   lives = Math.min(lives + 1, 5);
+  }
+
+  const rEl = document.createElement('div');
+  rEl.className = 'chest-reward';
+  rEl.style.left = (rect.left + 16) + 'px';
+  rEl.style.top  = (rect.top - 20) + 'px';
+  rEl.innerHTML = `<span class="r-icon">${icon}</span><span class="r-text">${text}</span>`;
+  document.body.appendChild(rEl);
+  setTimeout(() => rEl.remove(), 2200);
+
+  updateHUD();
+  setTimeout(() => chest.remove(), 600);
+}
+
+</script>
+</body>
+</html>
