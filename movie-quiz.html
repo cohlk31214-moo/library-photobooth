@@ -1,0 +1,635 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>🎬 電影問答大挑戰</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --gold: #FFD700;
+  --gold2: #FFA500;
+  --red: #E03C3C;
+  --dark: #060810;
+  --cream: #F0EAD6;
+  --silver: #9090A0;
+  --green: #2ECC71;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* ── Full-screen single-page layout ── */
+html, body {
+  height: 100%;
+  overflow: hidden;
+  background: var(--dark);
+  color: var(--cream);
+  font-family: 'Noto Sans TC', sans-serif;
+}
+
+/* ── BACKGROUND ── */
+.star-layer { position:fixed; inset:0; z-index:0; pointer-events:none; }
+.star { position:absolute; background:white; border-radius:50%; animation:twinkle ease-in-out infinite; }
+@keyframes twinkle { 0%,100%{opacity:0.08;transform:scale(1)} 50%{opacity:0.7;transform:scale(1.5)} }
+
+.float-layer { position:fixed; inset:0; z-index:1; pointer-events:none; overflow:hidden; }
+.float-item { position:absolute; opacity:0; animation:floatUp linear infinite; user-select:none; }
+@keyframes floatUp {
+  0%   { transform:translateY(0) rotate(0deg); opacity:0; }
+  10%  { opacity:0.18; }
+  90%  { opacity:0.08; }
+  100% { transform:translateY(-110vh) rotate(360deg); opacity:0; }
+}
+
+.spotlight {
+  position:fixed; top:-50%; left:38%; transform:translateX(-50%);
+  width:600px; height:900px;
+  background:conic-gradient(from 265deg at 50% 0%, transparent 55deg, rgba(255,215,0,0.045) 80deg, transparent 105deg);
+  pointer-events:none; z-index:1;
+  animation:sweep1 9s ease-in-out infinite alternate;
+  transform-origin:top center;
+}
+@keyframes sweep1 { from{transform:translateX(-50%) rotate(-20deg)} to{transform:translateX(-50%) rotate(18deg)} }
+
+.spotlight2 {
+  position:fixed; top:-50%; right:2%;
+  width:380px; height:700px;
+  background:conic-gradient(from 265deg at 50% 0%, transparent 60deg, rgba(255,80,80,0.035) 80deg, transparent 100deg);
+  pointer-events:none; z-index:1;
+  animation:sweep2 13s ease-in-out infinite alternate;
+  transform-origin:top center;
+}
+@keyframes sweep2 { from{transform:rotate(10deg)} to{transform:rotate(-14deg)} }
+
+.vignette {
+  position:fixed; inset:0; z-index:2; pointer-events:none;
+  background:radial-gradient(ellipse at center, transparent 40%, rgba(0,0,0,0.72) 100%);
+}
+.scanlines {
+  position:fixed; inset:0; z-index:2; pointer-events:none;
+  background:repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.022) 3px, rgba(0,0,0,0.022) 4px);
+}
+
+/* ── FILM STRIPS ── */
+.filmstrip { position:fixed; left:0; right:0; height:28px; background:#0e0e0e; z-index:10; display:flex; align-items:center; overflow:hidden; }
+.filmstrip.top { top:0; border-bottom:1px solid #1e1e1e; }
+.filmstrip.bot { bottom:0; border-top:1px solid #1e1e1e; }
+.fs-inner { display:flex; align-items:center; animation:slideL 20s linear infinite; min-width:200%; }
+.filmstrip.bot .fs-inner { animation-name:slideR; }
+@keyframes slideL  { from{transform:translateX(0)} to{transform:translateX(-50%)} }
+@keyframes slideR  { from{transform:translateX(-50%)} to{transform:translateX(0)} }
+.fh { min-width:20px; height:14px; background:var(--dark); border-radius:2px; margin:0 3px; border:1px solid #222; flex-shrink:0; }
+.ff { min-width:32px; height:22px; background:#141414; border:1px solid #202020; border-radius:2px; margin:0 2px; display:flex; align-items:center; justify-content:center; font-size:10px; flex-shrink:0; }
+
+/* ── SCREENS wrapper — fills space between strips ── */
+.screen-wrap {
+  position: fixed;
+  top: 28px; bottom: 28px; left: 0; right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 14px;
+  overflow: hidden;
+}
+
+/* ── GLASS ── */
+.glass {
+  background: rgba(10,12,25,0.82);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 16px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 6px 30px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.05);
+}
+
+/* ═══════════════════════════════
+   START SCREEN
+═══════════════════════════════ */
+#start-screen {
+  width: 100%; max-width: 480px;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0;
+}
+#start-screen.hidden { display:none !important; }
+
+.start-title {
+  font-family:'Bebas Neue',sans-serif;
+  font-size: clamp(42px, 10vw, 68px);
+  line-height: 0.9; letter-spacing: 2px; text-align:center;
+  color: var(--cream);
+  text-shadow: 0 0 40px rgba(255,215,0,0.2), 3px 3px 0 rgba(224,60,60,0.5);
+  margin-bottom: 4px;
+}
+.start-title em { color:var(--gold); font-style:normal; display:block; }
+.hline { width:70px; height:2px; background:linear-gradient(90deg,transparent,var(--gold),transparent); margin:6px auto 12px; }
+
+.start-card {
+  width:100%; padding:18px 20px 20px;
+  display:flex; flex-direction:column; align-items:center; gap:12px;
+}
+.proj-icon {
+  font-size:52px;
+  filter:drop-shadow(0 0 16px rgba(255,215,0,0.4));
+  animation:proj 3s ease-in-out infinite;
+}
+@keyframes proj { 0%,100%{transform:translateY(0) rotate(-2deg)} 50%{transform:translateY(-7px) rotate(2deg)} }
+
+.tagline { color:var(--silver); font-size:13px; line-height:1.65; text-align:center; }
+
+.stat-row { display:flex; justify-content:center; gap:10px; flex-wrap:wrap; }
+.stat-pill {
+  background:rgba(255,215,0,0.07); border:1px solid rgba(255,215,0,0.2);
+  border-radius:30px; padding:7px 16px; text-align:center;
+}
+.stat-pill strong { font-family:'Bebas Neue',sans-serif; font-size:22px; color:var(--gold); display:block; line-height:1; }
+.stat-pill span { font-size:9px; letter-spacing:2px; text-transform:uppercase; color:var(--silver); }
+
+.btn-start {
+  background:linear-gradient(135deg, var(--red), #b52d2d);
+  color:white; border:none; border-radius:12px;
+  padding:13px 44px;
+  font-family:'Bebas Neue',sans-serif; font-size:20px; letter-spacing:3px;
+  cursor:pointer; transition:all 0.22s;
+  box-shadow:0 4px 22px rgba(224,60,60,0.4);
+  position:relative; overflow:hidden; width:100%;
+}
+.btn-start::after { content:''; position:absolute; inset:0; background:linear-gradient(135deg,rgba(255,255,255,0.12),transparent); }
+.btn-start:hover { transform:translateY(-2px); box-shadow:0 8px 28px rgba(224,60,60,0.5); }
+
+/* ═══════════════════════════════
+   GAME SCREEN — everything fits in one view
+═══════════════════════════════ */
+#game-screen {
+  display: none;
+  width: 100%; max-width: 500px;
+  height: 100%;
+  flex-direction: column;
+  gap: 6px;
+  justify-content: space-between;
+}
+#game-screen.show { display:flex; }
+
+/* HUD */
+.hud {
+  display:flex; justify-content:space-between; align-items:stretch;
+  gap:8px; flex-shrink:0; padding: 8px 10px;
+}
+.hud-cell { flex:1; text-align:center; }
+.hud-val {
+  font-family:'Bebas Neue',sans-serif; font-size:clamp(22px,5vw,30px); line-height:1;
+  color:var(--gold); display:block;
+  text-shadow:0 0 16px rgba(255,215,0,0.3);
+}
+.hud-lbl { font-size:8px; letter-spacing:2px; text-transform:uppercase; color:var(--silver); margin-top:1px; }
+
+/* Progress */
+.prog-wrap { height:4px; background:rgba(255,255,255,0.06); border-radius:2px; flex-shrink:0; overflow:hidden; }
+.prog-fill {
+  height:100%; background:linear-gradient(90deg, var(--red), var(--gold));
+  border-radius:2px; transition:width 0.5s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* Question card */
+.q-card {
+  padding:12px 14px 10px; flex-shrink:0; position:relative; overflow:hidden;
+}
+.q-card::before {
+  content:''; position:absolute; top:0; left:0; right:0; height:2px;
+  background:linear-gradient(90deg, var(--red), var(--gold), var(--red));
+  background-size:200%; animation:shimmer 3s linear infinite;
+}
+@keyframes shimmer { from{background-position:0%} to{background-position:200%} }
+.q-top { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+.q-counter { font-size:10px; letter-spacing:2px; color:var(--silver); text-transform:uppercase; }
+.q-badge {
+  font-size:9px; background:rgba(255,165,0,0.13); color:var(--gold2);
+  border:1px solid rgba(255,165,0,0.28); padding:2px 8px; border-radius:20px; letter-spacing:1px;
+}
+.q-text {
+  font-size: clamp(13px, 3.2vw, 17px);
+  line-height: 1.55; font-weight: 500; color: var(--cream);
+}
+
+/* Options — 2×2 grid on wider screens, single col on narrow */
+.options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+  flex-shrink: 0;
+}
+@media (max-width: 360px) {
+  .options { grid-template-columns: 1fr; }
+}
+
+.opt-btn {
+  background:rgba(18,20,36,0.85); border:1.5px solid rgba(255,255,255,0.07);
+  border-radius:10px; padding:9px 11px;
+  color:var(--cream); font-family:'Noto Sans TC',sans-serif;
+  font-size: clamp(11px, 2.6vw, 13.5px);
+  text-align:left; cursor:pointer; transition:all 0.17s ease;
+  display:flex; align-items:center; gap:9px; line-height:1.35;
+  position:relative; overflow:hidden;
+}
+.opt-btn::before {
+  content:''; position:absolute; inset:0;
+  background:linear-gradient(90deg, rgba(255,215,0,0.05), transparent);
+  opacity:0; transition:opacity 0.2s;
+}
+.opt-btn:hover:not(:disabled)::before { opacity:1; }
+.opt-btn:hover:not(:disabled) {
+  border-color:rgba(255,215,0,0.4);
+  transform:translateX(3px);
+  box-shadow:-3px 0 0 var(--gold);
+}
+.opt-key {
+  min-width:24px; height:24px; border-radius:6px;
+  background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Bebas Neue',sans-serif; font-size:12px; letter-spacing:1px;
+  color:var(--silver); flex-shrink:0; transition:all 0.17s;
+}
+.opt-btn:hover:not(:disabled) .opt-key { background:var(--gold); color:var(--dark); border-color:var(--gold); }
+.opt-btn.correct { border-color:var(--green); background:rgba(46,204,113,0.12); animation:pop 0.3s ease; }
+.opt-btn.correct .opt-key { background:var(--green); color:white; border-color:var(--green); }
+.opt-btn.wrong   { border-color:var(--red); background:rgba(224,60,60,0.1); animation:jolt 0.36s ease; }
+.opt-btn.wrong   .opt-key { background:var(--red); color:white; border-color:var(--red); }
+.opt-btn:disabled { cursor:default; }
+@keyframes pop  { 0%{transform:scale(1)} 40%{transform:scale(1.02)} 100%{transform:scale(1)} }
+@keyframes jolt { 0%,100%{transform:translateX(0)} 20%{transform:translateX(-6px)} 60%{transform:translateX(6px)} }
+
+/* Feedback */
+.feedback {
+  display:none; border-radius:10px; padding:9px 13px;
+  font-size: clamp(11px, 2.5vw, 13px); line-height:1.6; border-left:3px solid;
+  flex-shrink:0;
+}
+.feedback.show { display:block; animation:fadeUp 0.28s ease; }
+@keyframes fadeUp { from{opacity:0;transform:translateY(-5px)} to{opacity:1;transform:translateY(0)} }
+.feedback.ok { background:rgba(46,204,113,0.1); border-color:var(--green); color:#7ee8b0; }
+.feedback.no { background:rgba(224,60,60,0.1); border-color:var(--red); color:#f0908a; }
+.feedback strong { display:inline; font-size:inherit; }
+
+/* Next btn */
+.btn-next {
+  display:none; flex-shrink:0;
+  background:linear-gradient(135deg, var(--gold), var(--gold2));
+  color:var(--dark); border:none; border-radius:12px; padding:12px;
+  font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:2px;
+  cursor:pointer; transition:all 0.22s;
+  box-shadow:0 3px 16px rgba(255,215,0,0.22);
+}
+.btn-next.show { display:block; animation:fadeUp 0.28s ease; }
+.btn-next:hover { transform:translateY(-2px); box-shadow:0 7px 24px rgba(255,215,0,0.38); }
+
+/* ── CONFETTI ── */
+.cburst { position:fixed; pointer-events:none; z-index:200; }
+.cp { position:absolute; width:7px; height:7px; border-radius:2px; animation:cfall 0.8s ease-out forwards; }
+@keyframes cfall { 0%{transform:translate(0,0) rotate(0deg);opacity:1} 100%{transform:translate(var(--dx),var(--dy)) rotate(720deg);opacity:0} }
+
+/* ── STREAK BADGE ── */
+.streak-badge {
+  display:none; position:fixed; top:36px; right:12px;
+  background:linear-gradient(135deg, var(--gold), var(--gold2));
+  color:var(--dark); font-family:'Bebas Neue',sans-serif;
+  font-size:14px; letter-spacing:1px; padding:6px 13px;
+  border-radius:26px; z-index:20;
+  box-shadow:0 3px 18px rgba(255,215,0,0.5);
+  animation:badgePop 0.38s cubic-bezier(0.175,0.885,0.32,1.275) forwards;
+}
+@keyframes badgePop { from{transform:scale(0.4) translateX(30px);opacity:0} to{transform:scale(1) translateX(0);opacity:1} }
+
+/* ═══════════════════════════════
+   RESULT SCREEN
+═══════════════════════════════ */
+#result-screen {
+  display:none;
+  width:100%; max-width:480px;
+  flex-direction:column; align-items:center; gap:10px; text-align:center;
+}
+#result-screen.show { display:flex; animation:fadeUp 0.5s ease; }
+
+.res-trophy {
+  font-size:64px;
+  filter:drop-shadow(0 0 22px rgba(255,215,0,0.55));
+  animation:trophy-pulse 2s ease-in-out infinite;
+}
+@keyframes trophy-pulse { 0%,100%{transform:scale(1) rotate(-3deg)} 50%{transform:scale(1.08) rotate(3deg)} }
+
+.res-title {
+  font-family:'Bebas Neue',sans-serif; font-size:clamp(32px,8vw,52px);
+  color:var(--gold); letter-spacing:3px;
+  text-shadow:0 0 28px rgba(255,215,0,0.38);
+}
+.res-sub { color:var(--silver); font-size:13px; }
+
+.res-score-card { padding:18px 24px; width:100%; }
+.big-num {
+  font-family:'Bebas Neue',sans-serif; font-size:72px; line-height:1; display:block;
+  color:var(--gold);
+  text-shadow:0 0 36px rgba(255,215,0,0.45), 3px 3px 0 rgba(224,60,60,0.35);
+}
+.score-sub-lbl { color:var(--silver); font-size:11px; letter-spacing:2px; text-transform:uppercase; }
+.grade-pill {
+  display:inline-block; margin-top:10px;
+  background:rgba(255,215,0,0.1); border:1px solid rgba(255,215,0,0.3);
+  border-radius:26px; padding:5px 16px; font-size:13px; color:var(--gold); letter-spacing:2px;
+}
+
+.res-row { display:flex; justify-content:center; gap:32px; }
+.rr { text-align:center; }
+.rr-n { font-family:'Bebas Neue',sans-serif; font-size:38px; display:block; line-height:1; }
+.rr-l { font-size:9px; letter-spacing:2px; text-transform:uppercase; color:var(--silver); margin-top:2px; }
+.rr-ok .rr-n { color:var(--green); text-shadow:0 0 16px rgba(46,204,113,0.4); }
+.rr-no .rr-n { color:var(--red); text-shadow:0 0 16px rgba(224,60,60,0.4); }
+
+.btn-restart {
+  background:transparent; border:2px solid rgba(255,215,0,0.42); color:var(--gold);
+  border-radius:12px; padding:12px 40px;
+  font-family:'Bebas Neue',sans-serif; font-size:18px; letter-spacing:3px;
+  cursor:pointer; transition:all 0.22s; width:100%;
+}
+.btn-restart:hover { background:rgba(255,215,0,0.1); border-color:var(--gold); transform:translateY(-2px); }
+</style>
+</head>
+<body>
+
+<!-- BG layers -->
+<div class="star-layer" id="stars"></div>
+<div class="float-layer" id="floaters"></div>
+<div class="spotlight"></div>
+<div class="spotlight2"></div>
+<div class="vignette"></div>
+<div class="scanlines"></div>
+
+<!-- Film strips -->
+<div class="filmstrip top" id="fs-top"></div>
+<div class="filmstrip bot" id="fs-bot"></div>
+
+<!-- Streak badge -->
+<div class="streak-badge" id="streak-badge">🔥 連對 <span id="sb-num">2</span> 題！</div>
+
+<!-- Main screens -->
+<div class="screen-wrap">
+
+  <!-- START -->
+  <div id="start-screen">
+    <div class="start-title">電影問答<em>大挑戰</em></div>
+    <div class="hline"></div>
+    <div class="start-card glass">
+      <span class="proj-icon">🎥</span>
+      <p class="tagline">測試你對電影的了解！從經典老片到近代大片，<br>從導演到演員⋯⋯你能答對幾題？🍿</p>
+      <div class="stat-row">
+        <div class="stat-pill"><strong>15</strong><span>道題目</span></div>
+        <div class="stat-pill"><strong>4</strong><span>個選項</span></div>
+        <div class="stat-pill"><strong>∞</strong><span>挑戰次數</span></div>
+      </div>
+      <button class="btn-start" onclick="startGame()">▶ 開始挑戰</button>
+    </div>
+  </div>
+
+  <!-- GAME -->
+  <div id="game-screen">
+
+    <div class="hud glass">
+      <div class="hud-cell">
+        <span class="hud-val" id="score-val">0</span>
+        <div class="hud-lbl">分數</div>
+      </div>
+      <div class="hud-cell" style="border-left:1px solid rgba(255,255,255,0.07);border-right:1px solid rgba(255,255,255,0.07)">
+        <span class="hud-val" id="q-num-val">1</span>
+        <div class="hud-lbl">題目</div>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-val" id="streak-val">0</span>
+        <div class="hud-lbl">🔥 連對</div>
+      </div>
+    </div>
+
+    <div class="prog-wrap">
+      <div class="prog-fill" id="prog" style="width:0%"></div>
+    </div>
+
+    <div class="q-card glass">
+      <div class="q-top">
+        <span class="q-counter" id="q-counter">1 / 15</span>
+        <span class="q-badge" id="q-badge">類別</span>
+      </div>
+      <p class="q-text" id="q-text">題目</p>
+    </div>
+
+    <div class="options" id="options"></div>
+    <div class="feedback" id="feedback"></div>
+    <button class="btn-next" id="btn-next" onclick="nextQ()"></button>
+
+  </div>
+
+  <!-- RESULT -->
+  <div id="result-screen">
+    <span class="res-trophy" id="res-trophy">🏆</span>
+    <div class="res-title" id="res-title">電影宗師！</div>
+    <div class="res-sub" id="res-sub">你的電影知識令人嘆為觀止</div>
+    <div class="res-score-card glass">
+      <span class="big-num" id="res-score">0</span>
+      <div class="score-sub-lbl">最終得分</div>
+      <div class="grade-pill" id="res-grade">S 級達人</div>
+    </div>
+    <div class="res-row">
+      <div class="rr rr-ok"><span class="rr-n" id="res-ok">0</span><div class="rr-l">✓ 答對</div></div>
+      <div style="width:1px;background:rgba(255,255,255,0.08)"></div>
+      <div class="rr rr-no"><span class="rr-n" id="res-no">0</span><div class="rr-l">✗ 答錯</div></div>
+    </div>
+    <button class="btn-restart" onclick="restartGame()">↺ 再玩一次</button>
+  </div>
+
+</div>
+
+<script>
+/* ── BG INIT ── */
+const starEl = document.getElementById('stars');
+for (let i = 0; i < 110; i++) {
+  const s = document.createElement('div'); s.className = 'star';
+  const sz = Math.random() * 2 + 0.4;
+  s.style.cssText = `width:${sz}px;height:${sz}px;left:${Math.random()*100}%;top:${Math.random()*100}%;animation-duration:${2+Math.random()*4}s;animation-delay:${Math.random()*5}s`;
+  starEl.appendChild(s);
+}
+
+const EMOJIS = ['🎬','🎥','🍿','⭐','🎞️','🏆','🎭','📽️','✨','🌟','🎦'];
+const floatEl = document.getElementById('floaters');
+for (let i = 0; i < 16; i++) {
+  const f = document.createElement('div'); f.className = 'float-item';
+  f.textContent = EMOJIS[i % EMOJIS.length];
+  const dur = 14 + Math.random() * 16;
+  f.style.cssText = `left:${Math.random()*100}%;bottom:${-50+Math.random()*20}px;font-size:${13+Math.random()*14}px;animation-duration:${dur}s;animation-delay:${Math.random()*18}s`;
+  floatEl.appendChild(f);
+}
+
+const FS_ICONS = ['🎬','🎥','🍿','🎞️','⭐','🏆'];
+function buildStrip(id) {
+  const el = document.getElementById(id);
+  const inner = document.createElement('div'); inner.className = 'fs-inner';
+  for (let r = 0; r < 2; r++) {
+    for (let i = 0; i < 34; i++) {
+      const h = document.createElement('div'); h.className = 'fh'; inner.appendChild(h);
+      if (i % 3 === 1) {
+        const fr = document.createElement('div'); fr.className = 'ff';
+        fr.textContent = FS_ICONS[Math.floor(Math.random()*FS_ICONS.length)];
+        inner.appendChild(fr);
+      }
+    }
+  }
+  el.appendChild(inner);
+}
+buildStrip('fs-top'); buildStrip('fs-bot');
+
+/* ── CONFETTI ── */
+function burst(x, y) {
+  const COLS = ['#FFD700','#FF6B6B','#4ECDC4','#45B7D1','#FFA07A','#98FB98','#DDA0DD'];
+  const wrap = document.createElement('div'); wrap.className = 'cburst';
+  wrap.style.cssText = `left:${x}px;top:${y}px`;
+  document.body.appendChild(wrap);
+  for (let i = 0; i < 16; i++) {
+    const p = document.createElement('div'); p.className = 'cp';
+    const a = (i/16)*360, d = 50 + Math.random()*55;
+    p.style.cssText = `background:${COLS[i%COLS.length]};--dx:${Math.cos(a*Math.PI/180)*d}px;--dy:${Math.sin(a*Math.PI/180)*d-28}px;animation-delay:${Math.random()*0.07}s;border-radius:${Math.random()>0.5?'50%':'2px'}`;
+    wrap.appendChild(p);
+  }
+  setTimeout(() => wrap.remove(), 900);
+}
+
+/* ── QUESTIONS ── */
+const ALL = [
+  {cat:"經典名片",q:"《教父》（The Godfather）由哪位導演執導？",opts:["史蒂芬·史匹柏","法蘭西斯·柯波拉","馬丁·史柯西斯","奧利佛·史東"],ans:1,tip:"《教父》（1972）由法蘭西斯·福特·柯波拉執導，被譽為影史最偉大電影之一。"},
+  {cat:"票房紀錄",q:"全球史上票房最高的電影（截至2023年）是哪一部？",opts:["《終局之戰》","《阿凡達》","《鐵達尼號》","《獅子王》"],ans:1,tip:"《阿凡達》（2009，詹姆斯·卡麥隆導演）以超過29億美元票房穩居全球第一。"},
+  {cat:"奧斯卡",q:"哪部（些）電影獲得最多奧斯卡獎項（共11項）？",opts:["《賓漢》","《鐵達尼號》","《魔戒：王者再臨》","以上皆是"],ans:3,tip:"三部電影各贏得11座奧斯卡：《賓漢》(1959)、《鐵達尼號》(1997)、《魔戒：王者再臨》(2003)。"},
+  {cat:"演員",q:"李奧納多·狄卡皮歐首次獲得奧斯卡最佳男主角是哪部電影？",opts:["《鐵達尼號》","《神鬼獵人》","《華爾街之狼》","《全面啟動》"],ans:1,tip:"他憑《神鬼獵人》（The Revenant，2015）終於拿下首座奧斯卡最佳男主角。"},
+  {cat:"動畫電影",q:"宮崎駿的《神隱少女》哪一年獲奧斯卡最佳動畫長片？",opts:["2001年","2002年","2003年","2004年"],ans:2,tip:"《神隱少女》於2003年（第75屆奧斯卡）獲獎，是首部以此獎項獲獎的非英語電影。"},
+  {cat:"導演",q:"《黑暗騎士》三部曲的導演是誰？",opts:["提姆·波頓","克里斯多福·諾蘭","扎克·施奈德","喬·魯素"],ans:1,tip:"克里斯多福·諾蘭執導了蝙蝠俠黑暗騎士三部曲（2005–2012）。"},
+  {cat:"名台詞",q:"「我會給他一個他無法拒絕的提案」出自哪部電影？",opts:["《疤面煞星》","《教父》","《美國黑幫》","《四海好傢伙》"],ans:1,tip:"這句出自《教父》，由馬龍·白蘭度飾演的維托·柯里昂所說，是影史最著名台詞之一。"},
+  {cat:"漫威宇宙",q:"第一部《復仇者聯盟》上映於哪一年？",opts:["2010年","2011年","2012年","2013年"],ans:2,tip:"《復仇者聯盟》（The Avengers）於2012年上映，全球票房超過15億美元。"},
+  {cat:"科幻電影",q:"電影《2001太空漫遊》的導演是？",opts:["雷利·史考特","史丹利·庫柏力克","史蒂芬·史匹柏","詹姆斯·卡麥隆"],ans:1,tip:"《2001太空漫遊》（1968）由傳奇導演史丹利·庫柏力克執導，被譽為最具影響力的科幻電影。"},
+  {cat:"音樂電影",q:"《波西米亞狂想曲》描述哪個樂團的故事？",opts:["The Beatles","Led Zeppelin","Queen","The Rolling Stones"],ans:2,tip:"《波西米亞狂想曲》（2018）講述搖滾樂團 Queen 及主唱佛萊迪·墨裘利的故事。"},
+  {cat:"恐怖電影",q:"史蒂芬·金小說《牠》中，怪物最常以什麼形象出現？",opts:["狼人","吸血鬼","小丑","骷髏"],ans:2,tip:"Pennywise（牠）以小丑形象出現，是史上最令人印象深刻的虛構反派之一。"},
+  {cat:"動作片",q:"《捍衛戰士：獨行俠》（Top Gun: Maverick）上映於哪一年？",opts:["2020年","2021年","2022年","2023年"],ans:2,tip:"《Top Gun: Maverick》2022年上映，湯姆·克魯斯主演，全球票房超過14億美元。"},
+  {cat:"台灣電影",q:"李安哪部電影首次獲得奧斯卡最佳外語片獎？",opts:["《斷背山》","《臥虎藏龍》","《色，戒》","《推手》"],ans:1,tip:"《臥虎藏龍》（2000）讓李安首度拿下奧斯卡最佳外語片。"},
+  {cat:"劇情片",q:"臺灣片名《刺激1995》改編自哪位作家的作品？",opts:["史蒂芬·金","約翰·葛里遜","丹·布朗","湯姆·克蘭西"],ans:0,tip:"《刺激1995》（The Shawshank Redemption）改編自史蒂芬·金的中篇小說，至今仍是 IMDb 評分最高的電影之一。"},
+  {cat:"動畫電影",q:"《玩具總動員》是史上第一部什麼樣的電影？",opts:["3D電影","全電腦動畫長片","IMAX電影","互動式電影"],ans:1,tip:"《玩具總動員》（1995）是史上首部全電腦動畫長片，由皮克斯製作，開創動畫新時代。"},
+];
+
+/* ── STATE ── */
+let qs=[], cur=0, score=0, streak=0, ok=0, bad=0, done=false, streakTimer;
+function shuffle(a){ return [...a].sort(()=>Math.random()-0.5); }
+
+function startGame(){
+  qs=shuffle(ALL); cur=0; score=0; streak=0; ok=0; bad=0; done=false;
+  document.getElementById('start-screen').classList.add('hidden');
+  document.getElementById('result-screen').style.display='none';
+  document.getElementById('result-screen').classList.remove('show');
+  const gs=document.getElementById('game-screen');
+  gs.style.display='flex'; gs.classList.add('show');
+  updateHUD(); loadQ();
+}
+
+function loadQ(){
+  done=false;
+  const q=qs[cur], tot=qs.length;
+  document.getElementById('q-counter').textContent=`${cur+1} / ${tot}`;
+  document.getElementById('q-num-val').textContent=cur+1;
+  document.getElementById('q-badge').textContent=q.cat;
+  document.getElementById('q-text').textContent=q.q;
+  document.getElementById('prog').style.width=`${(cur/tot)*100}%`;
+  document.getElementById('feedback').className='feedback';
+  document.getElementById('feedback').innerHTML='';
+  document.getElementById('btn-next').className='btn-next';
+
+  const opts=document.getElementById('options');
+  opts.innerHTML='';
+  ['A','B','C','D'].forEach((ltr,i)=>{
+    const b=document.createElement('button'); b.className='opt-btn';
+    b.innerHTML=`<span class="opt-key">${ltr}</span>${q.opts[i]}`;
+    b.onclick=(e)=>pick(i,b,e);
+    opts.appendChild(b);
+  });
+}
+
+function pick(idx, btn, evt){
+  if(done) return;
+  done=true;
+  const q=qs[cur];
+  document.querySelectorAll('.opt-btn').forEach(b=>b.disabled=true);
+  const fb=document.getElementById('feedback');
+  const isLast=cur+1>=qs.length;
+
+  if(idx===q.ans){
+    btn.classList.add('correct');
+    score += streak>=2 ? 15 : 10;
+    streak++; ok++;
+    fb.innerHTML=`<strong>🎉 答對！</strong> ${q.tip}`;
+    fb.className='feedback ok show';
+    burst(evt.clientX, evt.clientY);
+    if(streak>=2){
+      document.getElementById('sb-num').textContent=streak;
+      const sb=document.getElementById('streak-badge');
+      sb.style.display='block';
+      clearTimeout(streakTimer);
+      streakTimer=setTimeout(()=>{ sb.style.display='none'; },2200);
+    }
+  } else {
+    btn.classList.add('wrong');
+    document.querySelectorAll('.opt-btn')[q.ans].classList.add('correct');
+    streak=0; bad++;
+    fb.innerHTML=`<strong>❌ 答錯了</strong> ${q.tip}`;
+    fb.className='feedback no show';
+  }
+  updateHUD();
+  const bn=document.getElementById('btn-next');
+  bn.className='btn-next show';
+  bn.textContent=isLast?'查看結果 🎬':'下一題 →';
+}
+
+function updateHUD(){
+  document.getElementById('score-val').textContent=score;
+  document.getElementById('streak-val').textContent=streak;
+}
+
+function nextQ(){
+  cur++;
+  if(cur>=qs.length) showResult();
+  else loadQ();
+}
+
+function showResult(){
+  document.getElementById('game-screen').style.display='none';
+  document.getElementById('game-screen').classList.remove('show');
+  const rs=document.getElementById('result-screen');
+  rs.style.display='flex'; rs.classList.add('show');
+
+  const pct=Math.round((ok/qs.length)*100);
+  document.getElementById('res-score').textContent=score;
+  document.getElementById('res-ok').textContent=ok;
+  document.getElementById('res-no').textContent=bad;
+
+  let trophy,title,sub,grade;
+  if(pct>=90)      {trophy='🏆';title='電影宗師！';sub='你對電影的了解令人嘆為觀止';grade='✦ S 級電影達人 ✦';}
+  else if(pct>=75) {trophy='🥇';title='電影專家！';sub='你的電影知識相當豐富';grade='✦ A 級電影迷 ✦';}
+  else if(pct>=60) {trophy='🥈';title='還不錯！';sub='你對電影有一定程度的認識';grade='✦ B 級觀影者 ✦';}
+  else if(pct>=40) {trophy='🥉';title='繼續加油！';sub='多看幾部電影再來挑戰';grade='✦ C 級新手 ✦';}
+  else             {trophy='🎬';title='繼續努力！';sub='電影的世界等你來探索';grade='✦ D 級初學者 ✦';}
+
+  document.getElementById('res-trophy').textContent=trophy;
+  document.getElementById('res-title').textContent=title;
+  document.getElementById('res-sub').textContent=sub;
+  document.getElementById('res-grade').textContent=grade;
+
+  for(let i=0;i<5;i++) setTimeout(()=>burst(80+Math.random()*(window.innerWidth-160),80+Math.random()*(window.innerHeight*0.35)),i*200);
+}
+
+function restartGame(){
+  document.getElementById('result-screen').style.display='none';
+  document.getElementById('result-screen').classList.remove('show');
+  const ss=document.getElementById('start-screen');
+  ss.classList.remove('hidden'); ss.style.display='';
+}
+</script>
+</body>
+</html>
