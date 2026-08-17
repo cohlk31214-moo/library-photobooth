@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>電影DVD主題掃描活動 AR</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #container { position: fixed; top:0; left:0; width:100%; height:100%; }
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%;
+    padding: 14px 16px; box-sizing: border-box;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));
+    color: #fff; z-index: 10; pointer-events: none;
+  }
+  #ui h1 { margin: 0; font-size: 17px; letter-spacing: 1px; }
+  #ui p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+  #status {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.55); color: #fff; padding: 8px 18px;
+    border-radius: 20px; font-size: 14px; z-index: 10; transition: opacity 0.3s;
+    opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+  #status.show { opacity: 1; }
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: #000; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; box-sizing: border-box;
+  }
+  #startOverlay h1 { font-size: 20px; margin: 0 0 10px; }
+  #startOverlay p { font-size: 18px; line-height: 1.6; opacity: 0.85; margin: 0 0 28px; }
+  #startBtn {
+    padding: 14px 36px; font-size: 16px; border-radius: 28px; border: none;
+    background: #fff; color: #000; font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<div id="startOverlay">
+  <h1>🎬 電影DVD主題掃描活動</h1>
+  <p>請點擊下方按鈕啟動相機，<br>接著將鏡頭對準電影DVD封面</p>
+  <button id="startBtn">▶ 點擊開始 AR</button>
+</div>
+
+<div id="ui">
+  <h1>🎬 電影DVD主題掃描活動</h1>
+  <p>請將鏡頭對準電影DVD封面</p>
+</div>
+<div id="container"></div>
+<div id="status"></div>
+<script>
+  window.addEventListener("error", (e) => {
+    const overlay = document.getElementById("startOverlay");
+    overlay.style.display = "flex";
+    overlay.innerHTML =
+      '<h1>⚠️ 程式錯誤</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (e.message || "未知錯誤") +
+      "</p>";
+  });
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+/* ============================================================
+   DVD清單：index 必須跟編譯 targets.mind 時「上傳圖片的順序」一致
+   video：要播放的影片檔（這裡是實際拍攝的DVD封面畫面，不去背，維持原始影像）
+   ============================================================ */
+const DVD_CONFIG = [
+  { index: 0, title: "功夫熊貓", video: "./kungfu-panda-effect.mp4" },
+  // { index: 1, title: "下一部電影...", video: "./xxx.mp4" },
+];
+
+const statusEl = document.getElementById("status");
+function showStatus(text) {
+  statusEl.textContent = text;
+  statusEl.classList.add("show");
+}
+function hideStatus() {
+  statusEl.classList.remove("show");
+}
+
+const mindarThree = new MindARThree({
+  container: document.querySelector("#container"),
+  imageTargetSrc: "./targets.mind",
+  maxTrack: 4,
+});
+const { renderer, scene, camera } = mindarThree;
+
+const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+scene.add(light);
+
+/* ---------- 影片卡片（不去背，直接呈現原始拍攝畫面） ---------- */
+function createVideoGroup(videoSrc) {
+  const group = new THREE.Group();
+
+  const video = document.createElement("video");
+  video.src = videoSrc;
+  video.crossOrigin = "anonymous";
+  video.loop = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.addEventListener("error", () => {
+    showStatus(`⚠️ 影片載入失敗: ${videoSrc}`);
+  });
+  // 部分手機瀏覽器要求影片元素要真的存在於頁面中才能正常解碼播放
+  video.style.position = "fixed";
+  video.style.width = "1px";
+  video.style.height = "1px";
+  video.style.opacity = "0";
+  video.style.pointerEvents = "none";
+  document.body.appendChild(video);
+  video.play().catch(() => {});
+
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const aspect = 9 / 16; // DVD封面直式比例，若非16:9可再調整
+  const height = 1.4;
+  const width = height * aspect;
+
+  const material = new THREE.MeshBasicMaterial({ map: texture }); // 不去背，直接顯示原始畫面
+
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  const yOffset = 0.05;
+  plane.position.set(0, yOffset, 0);
+  group.add(plane);
+
+  group.userData.update = (t) => {
+    plane.position.y = yOffset + Math.sin(t * 1.2) * 0.03;
+    plane.rotation.y = Math.sin(t * 0.6) * 0.08;
+  };
+
+  return group;
+}
+
+/* ---------- 依 DVD_CONFIG 建立每個 anchor ---------- */
+const groups = [];
+DVD_CONFIG.forEach((dvd) => {
+  const anchor = mindarThree.addAnchor(dvd.index);
+  const group = createVideoGroup(dvd.video);
+  anchor.group.add(group);
+  groups.push(group);
+
+  anchor.onTargetFound = () => {
+    showStatus(`🎬 ${dvd.title}`);
+  };
+  anchor.onTargetLost = () => {
+    hideStatus();
+  };
+});
+
+const clock = new THREE.Clock();
+const start = async () => {
+  try {
+    await mindarThree.start();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      groups.forEach((g) => g.userData.update && g.userData.update(t));
+      renderer.render(scene, camera);
+    });
+  } catch (err) {
+    document.getElementById("startOverlay").style.display = "flex";
+    document.getElementById("startOverlay").innerHTML =
+      '<h1>⚠️ 啟動失敗</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (err && err.message ? err.message : String(err)) +
+      "</p>";
+  }
+};
+
+// iPhone Safari 等瀏覽器要求「使用者手動點擊」才能啟動相機
+document.getElementById("startBtn").addEventListener("click", () => {
+  document.getElementById("startOverlay").style.display = "none";
+  start();
+});
+</script>
+</body>
+</html>
