@@ -90,6 +90,8 @@ const mindarThree = new MindARThree({
   container: document.querySelector("#container"),
   imageTargetSrc: "./targets-valentine.mind",
   maxTrack: 1,
+  filterMinCF: 0.0001, // 數值越小，追蹤越平滑穩定（但反應會稍慢一點點）
+  filterBeta: 0.001,
 });
 const { renderer, scene, camera } = mindarThree;
 
@@ -159,8 +161,8 @@ function createVideoGroup(videoSrc) {
   group.add(plane);
 
   group.userData.update = (t) => {
-    plane.position.y = yOffset + Math.sin(t * 1.2) * 0.02;
-    plane.rotation.y = Math.sin(t * 0.6) * 0.05;
+    // 漂浮動畫幅度已大幅縮小，避免跟追蹤雜訊疊加造成明顯晃動
+    plane.position.y = yOffset + Math.sin(t * 1.0) * 0.006;
   };
 
   return group;
