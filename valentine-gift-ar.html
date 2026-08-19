@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Happy Valentine's Day AR</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #container { position: fixed; top:0; left:0; width:100%; height:100%; }
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%;
+    padding: 14px 16px; box-sizing: border-box;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));
+    color: #fff; z-index: 10; pointer-events: none;
+  }
+  #ui h1 { margin: 0; font-size: 17px; letter-spacing: 1px; }
+  #ui p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+  #status {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.55); color: #fff; padding: 8px 18px;
+    border-radius: 20px; font-size: 14px; z-index: 10; transition: opacity 0.3s;
+    opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+  #status.show { opacity: 1; }
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: #000; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; box-sizing: border-box;
+  }
+  #startOverlay h1 { font-size: 20px; margin: 0 0 10px; }
+  #startOverlay p { font-size: 18px; line-height: 1.6; opacity: 0.85; margin: 0 0 28px; }
+  #startBtn {
+    padding: 14px 36px; font-size: 16px; border-radius: 28px; border: none;
+    background: #fff; color: #000; font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<div id="startOverlay">
+  <h1>💕 Happy Valentine's Day</h1>
+  <p>請點擊下方按鈕啟動相機，<br>接著將鏡頭對準卡片</p>
+  <button id="startBtn">▶ 點擊開始 AR</button>
+</div>
+
+<div id="ui">
+  <h1>💕 Happy Valentine's Day</h1>
+  <p>請將鏡頭對準卡片</p>
+</div>
+<div id="container"></div>
+<div id="status"></div>
+<script>
+  window.addEventListener("error", (e) => {
+    const overlay = document.getElementById("startOverlay");
+    overlay.style.display = "flex";
+    overlay.innerHTML =
+      '<h1>⚠️ 程式錯誤</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (e.message || "未知錯誤") +
+      "</p>";
+  });
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+const CARD_CONFIG = [
+  { index: 0, title: "Happy Valentine's Day", video: "./gift-bunny-effect.mp4" },
+];
+
+const statusEl = document.getElementById("status");
+function showStatus(text) {
+  statusEl.textContent = text;
+  statusEl.classList.add("show");
+}
+function hideStatus() {
+  statusEl.classList.remove("show");
+}
+
+const mindarThree = new MindARThree({
+  container: document.querySelector("#container"),
+  imageTargetSrc: "./targets-valentine.mind",
+  maxTrack: 1,
+});
+const { renderer, scene, camera } = mindarThree;
+
+const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+scene.add(light);
+
+/* ---------- 影片卡片（去白底，套用調校過、保留淺色主體的去背參數） ---------- */
+function createVideoGroup(videoSrc) {
+  const group = new THREE.Group();
+
+  const video = document.createElement("video");
+  video.src = videoSrc;
+  video.crossOrigin = "anonymous";
+  video.loop = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.addEventListener("error", () => {
+    showStatus(`⚠️ 影片載入失敗: ${videoSrc}`);
+  });
+  video.style.position = "fixed";
+  video.style.width = "1px";
+  video.style.height = "1px";
+  video.style.opacity = "0";
+  video.style.pointerEvents = "none";
+  document.body.appendChild(video);
+  video.play().catch(() => {});
+
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const aspect = 1683 / 1190; // 原始GIF比例（橫式）
+  const width = 1.6;
+  const height = width / aspect;
+
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: texture },
+      threshold: { value: 0.06 }, // 只鎖定接近純白的背景，保留兔子身上米白色細節
+      smoothing: { value: 0.22 }, // 柔化邊緣，避免反光處生硬消失
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float threshold;
+      uniform float smoothing;
+      varying vec2 vUv;
+      void main() {
+        vec4 color = texture2D(map, vUv);
+        float dist = distance(color.rgb, vec3(1.0));
+        float alpha = smoothstep(threshold, threshold + smoothing, dist);
+        gl_FragColor = vec4(color.rgb, alpha);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+
+  const plane = new THREE.Mesh(new THREE.PlaneGeometry(width, height), material);
+  const yOffset = 0.05;
+  plane.position.set(0, yOffset, 0);
+  group.add(plane);
+
+  group.userData.update = (t) => {
+    plane.position.y = yOffset + Math.sin(t * 1.2) * 0.02;
+    plane.rotation.y = Math.sin(t * 0.6) * 0.05;
+  };
+
+  return group;
+}
+
+const groups = [];
+CARD_CONFIG.forEach((card) => {
+  const anchor = mindarThree.addAnchor(card.index);
+  const group = createVideoGroup(card.video);
+  anchor.group.add(group);
+  groups.push(group);
+
+  anchor.onTargetFound = () => {
+    showStatus(`💕 ${card.title}`);
+  };
+  anchor.onTargetLost = () => {
+    hideStatus();
+  };
+});
+
+const clock = new THREE.Clock();
+const start = async () => {
+  try {
+    await mindarThree.start();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      groups.forEach((g) => g.userData.update && g.userData.update(t));
+      renderer.render(scene, camera);
+    });
+  } catch (err) {
+    document.getElementById("startOverlay").style.display = "flex";
+    document.getElementById("startOverlay").innerHTML =
+      '<h1>⚠️ 啟動失敗</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (err && err.message ? err.message : String(err)) +
+      "</p>";
+  }
+};
+
+document.getElementById("startBtn").addEventListener("click", () => {
+  document.getElementById("startOverlay").style.display = "none";
+  start();
+});
+</script>
+</body>
+</html>
