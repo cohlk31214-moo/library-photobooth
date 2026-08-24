@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>市圖電影院 AR 測試</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; }
+  #container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+  #loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #111; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; font-size: 18px; z-index: 999;
+    text-align: center; padding: 20px; box-sizing: border-box;
+  }
+  #hint {
+    position: fixed; bottom: 20px; left: 0; width: 100%; text-align: center;
+    color: #fff; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,0.8); z-index: 998; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">正在載入 AR 資源，請稍候...<br>請將鏡頭對準市圖電影院節目表</div>
+<div id="container"></div>
+<div id="hint">請將鏡頭對準「市圖電影院」節目表</div>
+
+<!-- 影片素材：物理掛載在 DOM 上，確保手機端解碼穩定 -->
+<video id="video-letranger" src="./poster-letranger.mp4" muted loop playsinline webkit-playsinline crossorigin="anonymous" style="display:none;"></video>
+<video id="video-kungfupanda" src="./poster-kungfupanda.mp4" muted loop playsinline webkit-playsinline crossorigin="anonymous" style="display:none;"></video>
+
+<script type="module">
+import * as THREE from "https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.module.js";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+// ------------------------------------------------------------------
+// 測試資料（先用 2 部片測試技術可行性，之後可擴充到 12 部）
+// ⚠️ 異鄉人這筆資料目前是佔位測試文字，請確認/提供正確欄位內容
+// ------------------------------------------------------------------
+const MOVIES = [
+  {
+    date: "8/24",
+    title: "異鄉人",
+    genre: "劇情",
+    origin: "法國",
+    length: "112分",
+    rating: "普",
+    videoEl: null // 稍後指定
+  },
+  {
+    date: "8/31",
+    title: "功夫熊貓",
+    genre: "動畫",
+    origin: "好萊塢",
+    length: "112分",
+    rating: "普",
+    videoEl: null
+  }
+];
+
+const CAROUSEL_INTERVAL_MS = 5000;
+
+// ------------------------------------------------------------------
+// 去背 Shader（沿用 photobooth / book-fair 系列相同的綠幕去背參數）
+// ------------------------------------------------------------------
+const chromaKeyVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const chromaKeyFragmentShader = `
+  uniform sampler2D map;
+  uniform vec3 keyColor;
+  uniform float threshold;
+  uniform float smoothing;
+  varying vec2 vUv;
+  void main() {
+    vec4 texColor = texture2D(map, vUv);
+    float diff = length(texColor.rgb - keyColor);
+    float alpha = smoothstep(threshold, threshold + smoothing, diff);
+    gl_FragColor = vec4(texColor.rgb, alpha * texColor.a);
+  }
+`;
+
+function makeChromaKeyMaterial(map) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: map },
+      keyColor: { value: new THREE.Vector3(0, 1, 0) }, // #00FF00
+      threshold: { value: 0.01 },
+      smoothing: { value: 0.22 }
+    },
+    vertexShader: chromaKeyVertexShader,
+    fragmentShader: chromaKeyFragmentShader,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+}
+
+// ------------------------------------------------------------------
+// 文字卡片用 canvas 貼圖（浮動文字，背景保持透明）
+// ------------------------------------------------------------------
+function makeTextTexture({ lines, colors, fontSizes, width = 512, height = 1024 }) {
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0, 0, width, height);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+
+  const lineGap = height / (lines.length + 1);
+  lines.forEach((line, i) => {
+    ctx.font = `bold ${fontSizes[i] || 60}px "Microsoft JhengHei", "PingFang TC", sans-serif`;
+    ctx.fillStyle = colors[i] || "#ffffff";
+    ctx.shadowColor = "rgba(0,0,0,0.6)";
+    ctx.shadowBlur = 8;
+    ctx.fillText(line, width / 2, lineGap * (i + 1));
+  });
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function buildLeftTexture(movie) {
+  return makeTextTexture({
+    lines: [movie.date, movie.title],
+    colors: ["#FF6A3D", "#FF3B3B"],
+    fontSizes: [90, 100],
+    width: 512,
+    height: 1024
+  });
+}
+
+function buildRightTexture(movie) {
+  return makeTextTexture({
+    lines: [movie.genre, movie.origin, movie.length, movie.rating],
+    colors: ["#FFFFFF", "#FFFFFF", "#FFFFFF", "#FFFFFF"],
+    fontSizes: [70, 70, 70, 70],
+    width: 512,
+    height: 1024
+  });
+}
+
+// ------------------------------------------------------------------
+// 主程式
+// ------------------------------------------------------------------
+(async () => {
+  const mindarThree = new MindARThree({
+    container: document.querySelector("#container"),
+    imageTargetSrc: "./cinema-schedule-targets.mind",
+    filterMinCF: 0.0001,
+    filterBeta: 0.001,
+    uiScanning: false,
+    uiLoading: false
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const anchor = mindarThree.addAnchor(0);
+
+  // --- 底片邊框（frame-template.png，綠色去背） ---
+  const frameTexture = new THREE.TextureLoader().load("./frame-template.png");
+  frameTexture.encoding = THREE.sRGBEncoding;
+  const FRAME_ASPECT = 1920 / 1080; // 16:9
+  const frameWidth = 1;
+  const frameHeight = frameWidth / FRAME_ASPECT;
+  const frameGeo = new THREE.PlaneGeometry(frameWidth, frameHeight);
+  const frameMat = makeChromaKeyMaterial(frameTexture);
+  const frameMesh = new THREE.Mesh(frameGeo, frameMat);
+  frameMesh.position.set(0, 0, 0);
+  anchor.group.add(frameMesh);
+
+  // --- 海報影片（置中，維持影片原始 16:9 比例，去背後會露出置中的直式海報） ---
+  const videoLetranger = document.querySelector("#video-letranger");
+  const videoKungfupanda = document.querySelector("#video-kungfupanda");
+  MOVIES[0].videoEl = videoLetranger;
+  MOVIES[1].videoEl = videoKungfupanda;
+
+  const posterWidth = frameWidth * 0.5886; // 對應底片內窗寬度比例
+  const posterHeight = posterWidth / FRAME_ASPECT;
+  const posterGeo = new THREE.PlaneGeometry(posterWidth, posterHeight);
+
+  const posterTextures = MOVIES.map((m) => new THREE.VideoTexture(m.videoEl));
+  posterTextures.forEach((t) => { t.encoding = THREE.sRGBEncoding; });
+
+  let activeIndex = 0;
+  const posterMat = makeChromaKeyMaterial(posterTextures[activeIndex]);
+  const posterMesh = new THREE.Mesh(posterGeo, posterMat);
+  posterMesh.position.set(0, 0, 0.001);
+  anchor.group.add(posterMesh);
+
+  // --- 左側文字（日期 + 片名） ---
+  const zoneWidth = frameWidth * 0.1962;
+  const zoneHeight = frameHeight * (0.3921 / (1080 / 1920) * (1080 / 1920)); // 對齊內窗高度比例
+  const textZoneHeight = frameHeight * 0.6972; // 內窗高度佔整體比例
+
+  const leftGeo = new THREE.PlaneGeometry(zoneWidth, textZoneHeight);
+  const leftMat = new THREE.MeshBasicMaterial({ map: buildLeftTexture(MOVIES[activeIndex]), transparent: true });
+  const leftMesh = new THREE.Mesh(leftGeo, leftMat);
+  leftMesh.position.set(-frameWidth * 0.1962, 0, 0.002);
+  anchor.group.add(leftMesh);
+
+  // --- 右側文字（類型 / 出版地 / 長度 / 級別） ---
+  const rightGeo = new THREE.PlaneGeometry(zoneWidth, textZoneHeight);
+  const rightMat = new THREE.MeshBasicMaterial({ map: buildRightTexture(MOVIES[activeIndex]), transparent: true });
+  const rightMesh = new THREE.Mesh(rightGeo, rightMat);
+  rightMesh.position.set(frameWidth * 0.1962, 0, 0.002);
+  anchor.group.add(rightMesh);
+
+  // --- 播放控制 ---
+  function playMovie(index) {
+    MOVIES.forEach((m, i) => {
+      if (i === index) {
+        m.videoEl.currentTime = 0;
+        m.videoEl.play().catch(() => {});
+      } else {
+        m.videoEl.pause();
+      }
+    });
+  }
+
+  function pauseAll() {
+    MOVIES.forEach((m) => m.videoEl.pause());
+  }
+
+  function switchToMovie(index) {
+    activeIndex = index;
+    posterMesh.material.uniforms.map.value = posterTextures[index];
+    leftMesh.material.map = buildLeftTexture(MOVIES[index]);
+    leftMesh.material.needsUpdate = true;
+    rightMesh.material.map = buildRightTexture(MOVIES[index]);
+    rightMesh.material.needsUpdate = true;
+    playMovie(index);
+  }
+
+  let carouselTimer = null;
+  anchor.onTargetFound = () => {
+    document.querySelector("#hint").style.display = "none";
+    switchToMovie(0);
+    carouselTimer = setInterval(() => {
+      const next = (activeIndex + 1) % MOVIES.length;
+      switchToMovie(next);
+    }, CAROUSEL_INTERVAL_MS);
+  };
+
+  anchor.onTargetLost = () => {
+    document.querySelector("#hint").style.display = "block";
+    if (carouselTimer) {
+      clearInterval(carouselTimer);
+      carouselTimer = null;
+    }
+    pauseAll();
+  };
+
+  document.querySelector("#loading").style.display = "none";
+
+  await mindarThree.start();
+  renderer.setAnimationLoop(() => {
+    posterTextures.forEach((t) => { t.needsUpdate = true; });
+    renderer.render(scene, camera);
+  });
+})();
+</script>
+</body>
+</html>
