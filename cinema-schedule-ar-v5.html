@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>市圖電影院 AR 測試</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%; background: #000; }
+  #container { position: fixed; top: 0; left: 0; width: 100%; height: 100%; }
+  #loading {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background: #111; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; font-size: 18px; z-index: 999;
+    text-align: center; padding: 20px; box-sizing: border-box;
+  }
+  #hint {
+    position: fixed; bottom: 20px; left: 0; width: 100%; text-align: center;
+    color: #fff; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif;
+    font-size: 14px; text-shadow: 0 0 6px rgba(0,0,0,0.8); z-index: 998; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<div id="loading">正在載入 AR 資源，請稍候...<br>請將鏡頭對準市圖電影院節目表</div>
+<div id="container"></div>
+<div id="hint">請將鏡頭對準「市圖電影院」節目表</div>
+
+<!-- 影片素材：物理掛載在 DOM 上，確保手機端解碼穩定 -->
+<video id="video-carousel" src="./cinema-rolling-carousel-v2.mp4" muted loop playsinline webkit-playsinline crossorigin="anonymous" style="display:none;"></video>
+
+<script>
+// 全域錯誤攔截：不管哪一段程式出錯，畫面都會直接顯示錯誤訊息，方便截圖回報
+function showLoadError(msg) {
+  var el = document.querySelector("#loading");
+  if (!el) return;
+  el.innerHTML = "載入失敗，請截圖這段訊息回報：<br><span style='font-size:14px;word-break:break-all;'>" + msg + "</span>";
+  el.style.display = "flex";
+}
+window.addEventListener("error", function (e) {
+  showLoadError("全域錯誤: " + (e.message || (e.error && e.error.message) || String(e)));
+});
+window.addEventListener("unhandledrejection", function (e) {
+  var reason = e.reason;
+  showLoadError("Promise錯誤: " + (reason && reason.message ? reason.message : String(reason)));
+});
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.132.2/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+// ------------------------------------------------------------------
+// 這版架構已大幅簡化：
+// 海報、日期片名文字、轉場效果全部已經合成烘焙在同一支影片裡，
+// 不需要再另外疊加底片框架或文字圖層，程式只負責「去背 + 顯示 + 播放控制」
+// ------------------------------------------------------------------
+
+const chromaKeyVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const chromaKeyFragmentShader = `
+  uniform sampler2D map;
+  uniform vec3 keyColor;
+  uniform float threshold;
+  uniform float smoothing;
+  varying vec2 vUv;
+  void main() {
+    vec4 texColor = texture2D(map, vUv);
+    float diff = length(texColor.rgb - keyColor);
+    float alpha = smoothstep(threshold, threshold + smoothing, diff);
+    gl_FragColor = vec4(texColor.rgb, alpha * texColor.a);
+  }
+`;
+
+(async () => {
+ try {
+  const mindarThree = new MindARThree({
+    container: document.querySelector("#container"),
+    imageTargetSrc: "./cinema-schedule-targets.mind",
+    filterMinCF: 0.0001,
+    filterBeta: 0.001,
+    uiScanning: false,
+    uiLoading: false
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+
+  const anchor = mindarThree.addAnchor(0);
+
+  // --- 單一合成影片（海報+文字+轉場都已烘焙在裡面） ---
+  const videoEl = document.querySelector("#video-carousel");
+  const videoTexture = new THREE.VideoTexture(videoEl);
+  videoTexture.encoding = THREE.sRGBEncoding;
+
+  const VIDEO_ASPECT = 1080 / 1920; // 直式
+  const planeWidth = 1;
+  const planeHeight = planeWidth / VIDEO_ASPECT;
+  const geo = new THREE.PlaneGeometry(planeWidth, planeHeight);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: videoTexture },
+      keyColor: { value: new THREE.Vector3(0, 1, 0) }, // #00FF00
+      threshold: { value: 0.01 },
+      smoothing: { value: 0.22 }
+    },
+    vertexShader: chromaKeyVertexShader,
+    fragmentShader: chromaKeyFragmentShader,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.position.set(0, 0, 0);
+  anchor.group.add(mesh);
+
+  anchor.onTargetFound = () => {
+    document.querySelector("#hint").style.display = "none";
+    videoEl.currentTime = 0;
+    videoEl.play().catch(() => {});
+  };
+
+  anchor.onTargetLost = () => {
+    document.querySelector("#hint").style.display = "block";
+    videoEl.pause();
+  };
+
+  document.querySelector("#loading").style.display = "none";
+
+  await mindarThree.start();
+  renderer.setAnimationLoop(() => {
+    videoTexture.needsUpdate = true;
+    renderer.render(scene, camera);
+  });
+ } catch (err) {
+  document.querySelector("#loading").innerHTML =
+    "載入失敗，請截圖這段訊息回報：<br>" + (err && err.message ? err.message : String(err));
+  document.querySelector("#loading").style.display = "flex";
+  console.error(err);
+ }
+})();
+</script>
+</body>
+</html>
