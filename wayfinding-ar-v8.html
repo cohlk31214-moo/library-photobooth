@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>動線導引 AR</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #hint {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 15; color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+    border-radius: 20px; font-size: 14px; display: none;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  video.assetVideo { position: absolute; width: 2px; height: 2px; opacity: 0; }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 導覽</button>
+<div id="hint">請將鏡頭對準指標圖片</div>
+<div id="errBox"></div>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+let mindarThree = null;
+let started = false;
+
+// ---- 去白底 chroma key shader（既有標準寫法）----
+const chromaKeyVertexShader = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const chromaKeyFragmentShader = `
+  uniform sampler2D map;
+  uniform float threshold;
+  uniform float smoothing;
+  varying vec2 vUv;
+  void main() {
+    vec4 texColor = texture2D(map, vUv);
+    float dist = distance(texColor.rgb, vec3(1.0, 1.0, 1.0));
+    float alpha = smoothstep(threshold, threshold + smoothing, dist);
+    gl_FragColor = vec4(texColor.rgb, alpha * texColor.a);
+  }
+`;
+
+function createChromaKeyMaterial(videoTexture) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: videoTexture },
+      threshold: { value: 0.06 },
+      smoothing: { value: 0.22 }
+    },
+    vertexShader: chromaKeyVertexShader,
+    fragmentShader: chromaKeyFragmentShader,
+    transparent: true,
+    side: THREE.DoubleSide
+  });
+}
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("hint").style.display = "block";
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: "./wayfinding-targets.mind",
+    filterMinCF: 0.0001,
+    filterBeta: 0.001,
+    uiScanning: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+
+  // ---- 建立影片元素並掛到 DOM（手機解碼需求）----
+  const video = document.createElement("video");
+  video.className = "assetVideo";
+  video.src = "./wayfinding-station1-v2.mp4";
+  video.setAttribute("playsinline", "");
+  video.setAttribute("webkit-playsinline", "");
+  video.loop = true;
+  video.muted = true;
+  video.crossOrigin = "anonymous";
+  document.body.appendChild(video);
+
+  const videoTexture = new THREE.VideoTexture(video);
+  videoTexture.minFilter = THREE.LinearFilter;
+  videoTexture.magFilter = THREE.LinearFilter;
+
+  const material = createChromaKeyMaterial(videoTexture);
+
+  // 影片原始比例 1190 x 1683 (寬:高)
+  const aspect = 1190 / 1683;
+  const planeHeight = 1;
+  const planeWidth = planeHeight * aspect;
+  const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+  const plane = new THREE.Mesh(geometry, material);
+  plane.position.set(0, planeHeight / 2, 0);
+
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(plane);
+
+  anchor.onTargetFound = () => {
+    document.getElementById("hint").style.display = "none";
+    video.currentTime = 0;
+    video.play();
+  };
+  anchor.onTargetLost = () => {
+    document.getElementById("hint").style.display = "block";
+    video.pause();
+  };
+
+  try {
+    await mindarThree.start();
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("hint").style.display = "none";
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+  });
+}
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+</script>
+
+</body>
+</html>
