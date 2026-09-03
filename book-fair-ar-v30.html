@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>書香・茶香・咖啡香 書展 AR</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; height: 100%; background: #000; font-family: "PingFang TC", "Microsoft JhengHei", sans-serif; }
+  #container { position: fixed; top:0; left:0; width:100%; height:100%; }
+  #ui {
+    position: fixed; top: 0; left: 0; width: 100%;
+    padding: 14px 16px; box-sizing: border-box;
+    background: linear-gradient(to bottom, rgba(0,0,0,0.55), rgba(0,0,0,0));
+    color: #fff; z-index: 10; pointer-events: none;
+  }
+  #ui h1 { margin: 0; font-size: 17px; letter-spacing: 1px; }
+  #ui p { margin: 4px 0 0; font-size: 13px; opacity: 0.85; }
+  #status {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,0.55); color: #fff; padding: 8px 18px;
+    border-radius: 20px; font-size: 14px; z-index: 10; transition: opacity 0.3s;
+    opacity: 0; pointer-events: none; white-space: nowrap;
+  }
+  #status.show { opacity: 1; }
+  #startOverlay {
+    position: fixed; inset: 0; z-index: 20;
+    background: #000; color: #fff;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 24px; box-sizing: border-box;
+  }
+  #startOverlay h1 { font-size: 20px; margin: 0 0 10px; }
+  #startOverlay p { font-size: 18px; line-height: 1.6; opacity: 0.85; margin: 0 0 28px; }
+  #startBtn {
+    padding: 14px 36px; font-size: 16px; border-radius: 28px; border: none;
+    background: #fff; color: #000; font-weight: bold;
+  }
+</style>
+</head>
+<body>
+
+<div id="startOverlay">
+  <h1>📖 書香・茶香・咖啡香 書展</h1>
+  <p>請點擊下方按鈕啟動相機，<br>接著將鏡頭對準書展中的書封</p>
+  <button id="startBtn">▶ 點擊開始 AR</button>
+</div>
+
+<div id="ui">
+  <h1>📖 書香・茶香・咖啡香 書展</h1>
+  <p>請將鏡頭對準書展中的書封</p>
+</div>
+<div id="container"></div>
+<div id="status"></div>
+<script>
+  window.addEventListener("error", (e) => {
+    const overlay = document.getElementById("startOverlay");
+    overlay.style.display = "flex";
+    overlay.innerHTML =
+      '<h1>⚠️ 程式錯誤</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (e.message || "未知錯誤") +
+      "</p>";
+  });
+</script>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+/* ============================================================
+   書單設定：index 必須跟編譯 targets.mind 時「上傳圖片的順序」一致
+   category 只能是 'coffee'／'tea'／'book'（沒有 video 時用預設程序動畫，book無預設動畫）
+   video：若指定，會改用該影片檔做成漂浮卡片，取代預設的咖啡杯/茶杯動畫
+   label：畫面下方顯示的分類文字，不指定則依 category 自動帶入
+   ============================================================ */
+const BOOK_CONFIG = [
+  { index: 0, title: "咖啡學堂 COFFEE", category: "coffee", video: "./coffee-watercolor-effect.mp4" },
+  { index: 1, title: "茶飲時光", category: "tea", video: "./coffee-watercolor-effect.mp4" },
+  { index: 2, title: "台灣咖啡誌", category: "coffee", video: "./coffee-watercolor-effect.mp4" },
+  { index: 3, title: "咖啡好喝的秘密（Inoda Coffee）", category: "coffee", video: "./coffee-watercolor-effect.mp4" },
+  { index: 4, title: "旅讀書店", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 5, title: "那本書是 Sonohonwa", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 6, title: "愛書小日子", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 7, title: "你好，我是書店員", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 8, title: "書店怪問", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 9, title: "閱讀職人帶路的日本特色書店", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 10, title: "我的書店時光", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 11, title: "什麼都有書店", category: "book", label: "書香", video: "./about-book-effect.mp4" },
+  { index: 12, title: "這本書偷了我的貓！", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 13, title: "這本書吃了我的狗！", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 14, title: "一本童書的誕生", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 15, title: "愛啃書的尼寶：誤闖童話世界", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 16, title: "圖書館不安靜", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 17, title: "一本書 A Book", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 18, title: "書中有一道牆", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+  { index: 19, title: "富蘭克林的飛天書店", category: "book", label: "童書", video: "./astronaut-book-effect.mp4" },
+];
+
+const statusEl = document.getElementById("status");
+function showStatus(text) {
+  statusEl.textContent = text;
+  statusEl.classList.add("show");
+}
+function hideStatus() {
+  statusEl.classList.remove("show");
+}
+
+const mindarThree = new MindARThree({
+  container: document.querySelector("#container"),
+  imageTargetSrc: "./targets-v2.mind", // 用書封照片編譯後放這裡
+  maxTrack: 21,
+  filterMinCF: 0.00005, // 數值越小，追蹤越平滑穩定（反應會慢一點點，但能大幅減少晃動）
+  filterBeta: 0.0005,
+});
+const { renderer, scene, camera } = mindarThree;
+
+const light = new THREE.HemisphereLight(0xffffff, 0x444444, 1.2);
+scene.add(light);
+
+/* ---------- 自訂影片漂浮卡片（例如你自己做的GIF/影片特效） ---------- */
+function createVideoGroup(videoSrc) {
+  const group = new THREE.Group();
+
+  const video = document.createElement("video");
+  video.src = videoSrc;
+  video.crossOrigin = "anonymous";
+  video.loop = true;
+  video.muted = true;
+  video.playsInline = true;
+  video.addEventListener("error", () => {
+    showStatus(`⚠️ 影片載入失敗: ${videoSrc}`);
+  });
+  // 部分手機瀏覽器要求影片元素要真的存在於頁面中才能正常解碼播放
+  video.style.position = "fixed";
+  video.style.width = "1px";
+  video.style.height = "1px";
+  video.style.opacity = "0";
+  video.style.pointerEvents = "none";
+  document.body.appendChild(video);
+  video.play().catch(() => {});
+
+  const texture = new THREE.VideoTexture(video);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const aspect = 9 / 16;
+  const height = 1.4; // 放大：0.9 → 1.4
+  const width = height * aspect;
+
+  // 用 shader 把接近純白色的背景變透明，只留下有顏色的畫面內容
+  const material = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: texture },
+      threshold: { value: 0.01 }, // 再縮更小：幾乎只有絕對純白（255,255,255）才會被完全去除
+      smoothing: { value: 0.22 }, // 過渡柔和度維持
+    },
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float threshold;
+      uniform float smoothing;
+      varying vec2 vUv;
+      void main() {
+        vec4 color = texture2D(map, vUv);
+        float dist = distance(color.rgb, vec3(1.0));
+        float alpha = smoothstep(threshold, threshold + smoothing, dist);
+        gl_FragColor = vec4(color.rgb, alpha);
+      }
+    `,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+
+  const yOffset = 0.05; // 位置往下移：原本是 height/2+0.15（偏上），改成貼近書封中間偏下
+  const plane = new THREE.Mesh(
+    new THREE.PlaneGeometry(width, height),
+    material
+  );
+  plane.position.set(0, yOffset, 0);
+  group.add(plane);
+
+  group.userData.update = (t) => {
+    plane.position.y = yOffset + Math.sin(t * 1.2) * 0.03;
+    plane.rotation.y = Math.sin(t * 0.6) * 0.08;
+  };
+
+  return group;
+}
+
+/* ---------- 咖啡 AR 群組（預設，沒有指定 video 時使用） ---------- */
+function createCoffeeGroup() {
+  const group = new THREE.Group();
+
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.28, 0.22, 0.35, 32),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  cup.position.y = 0.18;
+  group.add(cup);
+
+  const coffeeTop = new THREE.Mesh(
+    new THREE.CircleGeometry(0.27, 32),
+    new THREE.MeshStandardMaterial({ color: 0x3b2418 })
+  );
+  coffeeTop.rotation.x = -Math.PI / 2;
+  coffeeTop.position.y = 0.355;
+  group.add(coffeeTop);
+
+  const handle = new THREE.Mesh(
+    new THREE.TorusGeometry(0.12, 0.03, 12, 24, Math.PI * 1.2),
+    new THREE.MeshStandardMaterial({ color: 0xffffff })
+  );
+  handle.position.set(0.28, 0.18, 0);
+  handle.rotation.z = Math.PI / 2.3;
+  group.add(handle);
+
+  const beans = [];
+  for (let i = 0; i < 6; i++) {
+    const bean = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 10, 10),
+      new THREE.MeshStandardMaterial({ color: 0x4a2c17 })
+    );
+    bean.scale.set(1, 0.7, 0.55);
+    const angle = (i / 6) * Math.PI * 2;
+    bean.userData.angle = angle;
+    bean.userData.radius = 0.55 + Math.random() * 0.15;
+    bean.userData.speed = 0.4 + Math.random() * 0.3;
+    bean.userData.yOff = Math.random() * Math.PI * 2;
+    group.add(bean);
+    beans.push(bean);
+  }
+
+  const steam = createSteam(0xffffff, 0.35);
+  group.add(steam);
+
+  group.userData.update = (t) => {
+    beans.forEach((b) => {
+      const a = b.userData.angle + t * b.userData.speed;
+      b.position.set(
+        Math.cos(a) * b.userData.radius,
+        0.4 + Math.sin(t * 1.5 + b.userData.yOff) * 0.08,
+        Math.sin(a) * b.userData.radius
+      );
+      b.rotation.y = a;
+    });
+    updateSteam(steam, t);
+  };
+
+  return group;
+}
+
+/* ---------- 茶 AR 群組（預設，沒有指定 video 時使用） ---------- */
+function createTeaGroup() {
+  const group = new THREE.Group();
+
+  const cup = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.3, 0.2, 0.22, 32),
+    new THREE.MeshStandardMaterial({ color: 0xf5f0e6 })
+  );
+  cup.position.y = 0.11;
+  group.add(cup);
+
+  const tea = new THREE.Mesh(
+    new THREE.CircleGeometry(0.29, 32),
+    new THREE.MeshStandardMaterial({ color: 0x7a5230 })
+  );
+  tea.rotation.x = -Math.PI / 2;
+  tea.position.y = 0.221;
+  group.add(tea);
+
+  const saucer = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.42, 0.02, 32),
+    new THREE.MeshStandardMaterial({ color: 0xf5f0e6 })
+  );
+  saucer.position.y = 0.0;
+  group.add(saucer);
+
+  const leaves = [];
+  for (let i = 0; i < 8; i++) {
+    const leaf = new THREE.Mesh(
+      new THREE.CircleGeometry(0.05, 8),
+      new THREE.MeshStandardMaterial({ color: 0x4f7942, side: THREE.DoubleSide })
+    );
+    leaf.scale.set(1, 1.8, 1);
+    const angle = (i / 8) * Math.PI * 2;
+    leaf.userData.angle = angle;
+    leaf.userData.radius = 0.5 + Math.random() * 0.2;
+    leaf.userData.speed = 0.3 + Math.random() * 0.3;
+    leaf.userData.yOff = Math.random() * Math.PI * 2;
+    group.add(leaf);
+    leaves.push(leaf);
+  }
+
+  const steam = createSteam(0xffffff, 0.22);
+  group.add(steam);
+
+  group.userData.update = (t) => {
+    leaves.forEach((l) => {
+      const a = l.userData.angle + t * l.userData.speed;
+      l.position.set(
+        Math.cos(a) * l.userData.radius,
+        0.35 + Math.sin(t * 1.3 + l.userData.yOff) * 0.1,
+        Math.sin(a) * l.userData.radius
+      );
+      l.rotation.y = a;
+      l.rotation.z = Math.sin(t * 2 + l.userData.yOff) * 0.5;
+    });
+    updateSteam(steam, t);
+  };
+
+  return group;
+}
+
+/* ---------- 共用：熱氣粒子 ---------- */
+function createSteam(color, baseY) {
+  const count = 40;
+  const geo = new THREE.BufferGeometry();
+  const positions = new Float32Array(count * 3);
+  const seeds = new Float32Array(count);
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = (Math.random() - 0.5) * 0.1;
+    positions[i * 3 + 1] = baseY;
+    positions[i * 3 + 2] = (Math.random() - 0.5) * 0.1;
+    seeds[i] = Math.random() * 10;
+  }
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.userData.seeds = seeds;
+  geo.userData.baseY = baseY;
+  const mat = new THREE.PointsMaterial({
+    color, size: 0.03, transparent: true, opacity: 0.55, depthWrite: false,
+  });
+  return new THREE.Points(geo, mat);
+}
+function updateSteam(points, t) {
+  const pos = points.geometry.attributes.position;
+  const seeds = points.geometry.userData.seeds;
+  const baseY = points.geometry.userData.baseY;
+  for (let i = 0; i < pos.count; i++) {
+    const seed = seeds[i];
+    const life = (t * 0.4 + seed) % 2;
+    pos.setY(i, baseY + life * 0.45);
+    pos.setX(i, Math.sin(t * 2 + seed) * 0.06);
+    pos.setZ(i, Math.cos(t * 2 + seed) * 0.06);
+  }
+  pos.needsUpdate = true;
+  points.material.opacity = 0.55 * (1 - ((t * 0.4) % 1));
+}
+
+/* ============================================================
+   海報彩蛋（index 20）：
+   1. 前5段文字合成一張長圖，用「片尾字幕」方式由下往上捲動
+      捲動範圍限制在 SAFE_TOP ~ SAFE_BOTTOM 之間，絕對不會蓋到海報
+      本身印刷的「噓...書展裡藏了東西」標題與QR code
+      （用 Three.js 的 clippingPlanes 做真正的區域遮罩，會跟著海報角度移動）
+   2. 捲動結束後，「驚喜現身文字」與「恐龍角色」用 Canva貼紙風格的
+      彈跳進場動畫（從小彈大、有回彈感）依序出現，不參與捲動
+   ============================================================ */
+renderer.localClippingEnabled = true;
+
+const POSTER_PX_WIDTH = 1190;
+const POSTER_PLANE_WIDTH = 1.18; // 放大字體：1.0 → 1.18
+const SAFE_TOP = 0.32;      // 安全區上邊界（局部座標），低於海報標題文字
+const SAFE_BOTTOM = -0.5;   // 安全區下邊界（局部座標），高於海報底部印刷角色
+const SCROLL_DURATION = 9;  // 字幕捲動總時長（秒，加長讓速度變慢）
+
+function easeOutBack(x) {
+  const c1 = 1.70158, c3 = c1 + 1;
+  return 1 + c3 * Math.pow(x - 1, 3) + c1 * Math.pow(x - 1, 2);
+}
+
+function createPosterRevealGroup() {
+  const group = new THREE.Group();
+  const loader = new THREE.TextureLoader();
+  const scale = POSTER_PLANE_WIDTH / POSTER_PX_WIDTH;
+
+  /* ---- 1. 捲動字幕（前5段合成長圖） ---- */
+  const creditsTexture = loader.load("./poster2-credits-roll-v2.png");
+  creditsTexture.colorSpace = THREE.SRGBColorSpace;
+  const creditsPxHeight = 640; // poster2-credits-roll.png 的實際高度
+  const creditsHeight = creditsPxHeight * scale;
+  const creditsMaterial = new THREE.MeshBasicMaterial({
+    map: creditsTexture, transparent: true, depthWrite: false, opacity: 0,
+  });
+  const creditsMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(POSTER_PLANE_WIDTH, creditsHeight),
+    creditsMaterial
+  );
+  const scrollStartY = SAFE_BOTTOM - creditsHeight / 2; // 一開始整段藏在安全區下方
+  const scrollEndY = SAFE_TOP + creditsHeight / 2;       // 捲完後整段離開安全區上方
+  creditsMesh.position.set(0, scrollStartY, 0);
+  group.add(creditsMesh);
+
+  // 局部座標的裁切平面（每一幀都會依海報目前的世界座標重新換算，會跟著海報角度移動）
+  const localClipTop = new THREE.Plane(new THREE.Vector3(0, -1, 0), SAFE_TOP);
+  const localClipBottom = new THREE.Plane(new THREE.Vector3(0, 1, 0), -SAFE_BOTTOM);
+
+  /* ---- 2. 彈跳進場的「驚喜現身文字」與「恐龍角色」 ---- */
+  function createPopMesh(src, pxHeight, centerY) {
+    const height = pxHeight * scale;
+    const texture = loader.load(src);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const material = new THREE.MeshBasicMaterial({
+      map: texture, transparent: true, depthWrite: false, opacity: 0,
+    });
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(POSTER_PLANE_WIDTH, height), material);
+    mesh.position.set(0, centerY, 0);
+    mesh.scale.set(0.3, 0.3, 0.3);
+    group.add(mesh);
+    return mesh;
+  }
+  const surpriseMesh = createPopMesh("./poster2-seg6-surprise-v2.png", 360, 0.02);
+  const characterMesh = createPopMesh("./poster2-seg7-character.png", 515, -0.42);
+
+  const POP_DURATION = 0.6;
+  const popDelays = {
+    surprise: SCROLL_DURATION + 0.2,
+    character: SCROLL_DURATION + 0.9,
+  };
+
+  function applyPop(mesh, elapsed, delay) {
+    const local = elapsed - delay;
+    if (local <= 0) {
+      mesh.material.opacity = 0;
+      return;
+    }
+    const p = THREE.MathUtils.clamp(local / POP_DURATION, 0, 1);
+    const eased = easeOutBack(p);
+    mesh.scale.setScalar(0.3 + 0.7 * eased);
+    mesh.material.opacity = Math.min(1, local / (POP_DURATION * 0.4));
+  }
+
+  let triggerT = null;
+  group.userData.trigger = (t) => { triggerT = t; };
+  group.userData.reset = () => {
+    triggerT = null;
+    creditsMaterial.opacity = 0;
+    creditsMesh.position.y = scrollStartY;
+    [surpriseMesh, characterMesh].forEach((m) => {
+      m.material.opacity = 0;
+      m.scale.set(0.3, 0.3, 0.3);
+    });
+  };
+  group.userData.update = (t) => {
+    // 強制用「這一幀當下」的最新座標更新世界矩陣，裁切平面才不會延遲一幀
+    group.updateMatrixWorld(true);
+    const worldClipTop = localClipTop.clone().applyMatrix4(group.matrixWorld);
+    const worldClipBottom = localClipBottom.clone().applyMatrix4(group.matrixWorld);
+    creditsMaterial.clippingPlanes = [worldClipTop, worldClipBottom];
+
+    if (triggerT === null) return;
+    const elapsed = t - triggerT;
+
+    // 捲動：0秒開始往上捲，SCROLL_DURATION秒時完全捲出安全區上方
+    creditsMaterial.opacity = elapsed < 0.15 ? elapsed / 0.15 : 1; // 快速淡入避免瞬間出現
+    const scrollP = THREE.MathUtils.clamp(elapsed / SCROLL_DURATION, 0, 1);
+    creditsMesh.position.y = THREE.MathUtils.lerp(scrollStartY, scrollEndY, scrollP);
+    if (scrollP >= 1) creditsMaterial.opacity = 0; // 捲完隱藏，避免停在畫面邊緣
+
+    applyPop(surpriseMesh, elapsed, popDelays.surprise);
+    applyPop(characterMesh, elapsed, popDelays.character);
+  };
+
+  return group;
+}
+
+/* ---------- 依 BOOK_CONFIG 建立每個 anchor ---------- */
+const groups = [];
+BOOK_CONFIG.forEach((book) => {
+  const anchor = mindarThree.addAnchor(book.index);
+  let group;
+  if (book.video) {
+    group = createVideoGroup(book.video);
+  } else {
+    group = book.category === "tea" ? createTeaGroup() : createCoffeeGroup();
+  }
+  anchor.group.add(group);
+  groups.push(group);
+
+  anchor.onTargetFound = () => {
+    const emoji = book.category === "tea" ? "🍵" : book.category === "coffee" ? "☕" : "📖";
+    const labelText = book.label || (book.category === "tea" ? "茶香" : book.category === "coffee" ? "咖啡香" : "書香");
+    showStatus(`${emoji} ${book.title}（${labelText}）`);
+  };
+  anchor.onTargetLost = () => {
+    hideStatus();
+  };
+});
+
+/* ---------- 海報彩蛋 anchor（index 20） ---------- */
+const posterAnchor = mindarThree.addAnchor(20);
+const posterGroup = createPosterRevealGroup();
+posterAnchor.group.add(posterGroup);
+groups.push(posterGroup);
+
+posterAnchor.onTargetFound = () => {
+  showStatus("🤫 書展裡藏了東西...");
+  posterGroup.userData.trigger(clock.getElapsedTime());
+};
+posterAnchor.onTargetLost = () => {
+  hideStatus();
+  posterGroup.userData.reset();
+};
+
+const clock = new THREE.Clock();
+const start = async () => {
+  try {
+    await mindarThree.start();
+    renderer.setAnimationLoop(() => {
+      const t = clock.getElapsedTime();
+      groups.forEach((g) => g.userData.update && g.userData.update(t));
+      renderer.render(scene, camera);
+    });
+  } catch (err) {
+    document.getElementById("startOverlay").style.display = "flex";
+    document.getElementById("startOverlay").innerHTML =
+      '<h1>⚠️ 啟動失敗</h1><p style="color:#ff8080; max-width: 320px; word-break: break-word;">' +
+      (err && err.message ? err.message : String(err)) +
+      "</p>";
+  }
+};
+
+// iPhone Safari 等瀏覽器要求「使用者手動點擊」才能啟動相機，
+// 所以改成點擊按鈕後才呼叫 start()，而不是網頁一載入就自動要求相機權限
+document.getElementById("startBtn").addEventListener("click", () => {
+  document.getElementById("startOverlay").style.display = "none";
+  start();
+});
+</script>
+</body>
+</html>
