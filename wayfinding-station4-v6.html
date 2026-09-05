@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>動線導引 AR - 館藏特色區說明</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #hint {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 15; color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+    border-radius: 20px; font-size: 14px; display: none;
+  }
+  #statusBox {
+    position: fixed; top: 8px; left: 8px; z-index: 998;
+    color: #0f0; background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border-radius: 8px; font-size: 12px; font-family: monospace;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  video:not(.assetVideo) {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 1 !important;
+  }
+  canvas {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    z-index: 2 !important;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 導覽</button>
+<div id="hint">請將鏡頭對準指標圖片</div>
+<div id="statusBox">狀態: 尚未啟動</div>
+<div id="errBox"></div>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+let mindarThree = null;
+let started = false;
+
+function setStatus(msg) {
+  const box = document.getElementById("statusBox");
+  if (box) box.textContent = "狀態: " + msg;
+}
+
+// 捲動字幕素材（單一長條圖，內含全部7行文字上下堆疊，由下到上依序line1~line7）
+const SCROLL_IMAGE = "./wayfinding-station4-scroll-v3.png";
+const SCROLL_IMAGE_WIDTH = 2008;
+const SCROLL_IMAGE_HEIGHT = 1530;
+const VIEWPORT_PX = 300; // 建立長條圖時使用的檢視窗高度(像素)，需與Python產圖時的viewport_h一致
+const SCROLL_SPEED = 0.035; // 每秒捲動的UV比例，越大捲越快
+
+// 強制修正MindAR產生的攝影機畫面/畫布，避免任何外層容器造成的黑邊
+function forceFullscreenFix() {
+  function apply(el) {
+    el.style.setProperty("position", "fixed", "important");
+    el.style.setProperty("top", "0", "important");
+    el.style.setProperty("left", "0", "important");
+    el.style.setProperty("width", "100vw", "important");
+    el.style.setProperty("height", "100vh", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("transform", "none", "important");
+    el.style.setProperty("object-fit", "cover", "important");
+  }
+  const video = document.querySelector("video:not(.assetVideo)");
+  const canvas = document.querySelector("canvas");
+  [video, canvas].forEach((el) => {
+    if (!el) return;
+    apply(el);
+    // 往上檢查所有外層容器，清除可能造成偏移/縮小的transform與寬高限制
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("width", "100%", "important");
+      node.style.setProperty("height", "100%", "important");
+      node.style.setProperty("max-width", "none", "important");
+      node = node.parentElement;
+    }
+  });
+}
+
+// 垂直位置：0 = 與掃描目標同高置中；正值往上、負值往下
+// 比上一版稍微提高，同時降低晃動幅度(離掃描點越遠，晃動會被放大)
+const VERTICAL_OFFSET = -0.05;
+// 顯示窗的世界單位寬高（稍微放大一點）
+const WORLD_WIDTH = 1.0;
+const WORLD_HEIGHT = WORLD_WIDTH * (VIEWPORT_PX / SCROLL_IMAGE_WIDTH);
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("hint").style.display = "block";
+  setStatus("初始化 MindAR...");
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: "./wayfinding-station4-targets.mind",
+    filterMinCF: 0.00005,
+    filterBeta: 0.0005,
+    uiScanning: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setClearColor(0x000000, 0);
+
+  // ---- 載入長條捲動圖，設定垂直方向重複貼圖，用來做「片尾字幕」式的連續捲動 ----
+  const textureLoader = new THREE.TextureLoader();
+  const scrollTexture = await textureLoader.loadAsync(SCROLL_IMAGE);
+  scrollTexture.colorSpace = THREE.SRGBColorSpace;
+  scrollTexture.wrapS = THREE.ClampToEdgeWrapping;
+  scrollTexture.wrapT = THREE.RepeatWrapping;
+  // 檢視窗佔整張長條圖高度的比例
+  scrollTexture.repeat.set(1, VIEWPORT_PX / SCROLL_IMAGE_HEIGHT);
+  scrollTexture.offset.set(0, 0);
+
+  const anchor = mindarThree.addAnchor(0);
+
+  const geometry = new THREE.PlaneGeometry(WORLD_WIDTH, WORLD_HEIGHT);
+  const material = new THREE.MeshBasicMaterial({
+    map: scrollTexture,
+    transparent: true,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(0, VERTICAL_OFFSET, 0);
+  anchor.group.add(mesh);
+
+  // 每一幀往上推進UV，達到文字持續往上捲動、循環播放的效果
+  let lastTime = performance.now();
+  function updateScroll() {
+    const now = performance.now();
+    const dt = (now - lastTime) / 1000;
+    lastTime = now;
+    scrollTexture.offset.y = (scrollTexture.offset.y + SCROLL_SPEED * dt) % 1;
+  }
+
+  anchor.onTargetFound = () => {
+    document.getElementById("hint").style.display = "none";
+    setStatus("已偵測到目標，字幕捲動中");
+  };
+  anchor.onTargetLost = () => {
+    document.getElementById("hint").style.display = "block";
+    setStatus("鏡頭運作中，掃描目標中...");
+  };
+
+  try {
+    await mindarThree.start();
+    setStatus("鏡頭運作中，掃描目標中...");
+    forceFullscreenFix();
+    setTimeout(forceFullscreenFix, 300);
+    setTimeout(forceFullscreenFix, 1000);
+    window.addEventListener("resize", forceFullscreenFix);
+    window.addEventListener("orientationchange", forceFullscreenFix);
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    setStatus("啟動失敗");
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("hint").style.display = "none";
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    updateScroll();
+    renderer.render(scene, camera);
+  });
+}
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+</script>
+
+</body>
+</html>
