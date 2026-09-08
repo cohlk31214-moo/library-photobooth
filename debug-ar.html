@@ -23,9 +23,11 @@
 <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
 <style>
-  html,body{ margin:0; padding:0; height:100%; overflow:hidden; background:#000;
+  html,body{ margin:0; padding:0; height:100%; overflow:hidden;
     font-family:-apple-system,"PingFang TC",sans-serif; }
-  a-scene{ position:fixed; inset:0; z-index:1; }
+  /* 注意：a-scene 不要自己加 position/z-index，
+     交給 mindar-image-aframe 自己控制版面，
+     不然它排出來的攝影機畫面（video）會被蓋住，變成黑畫面。 */
 
   #debugBox{
     position:fixed; top:0; left:0; right:0; z-index:100;
@@ -148,7 +150,7 @@
     let checkCount = 0;
     const checkTimer = setInterval(() => {
       checkCount++;
-      const video = document.querySelector('a-scene video');
+      const video = document.querySelector('video');
       if(!video){
         log('檢查#' + checkCount + '：畫面中還沒有 <video> 元素', 'warn');
       } else {

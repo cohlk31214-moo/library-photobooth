@@ -39,7 +39,9 @@
     font-family:"PingFang TC","Noto Sans CJK TC","Microsoft JhengHei",sans-serif;
     background:#000;
   }
-  a-scene{ position:fixed; inset:0; z-index:1; }
+  /* 注意：a-scene 不要自己加 position/z-index，
+     交給 mindar-image-aframe 自己控制版面，
+     不然它排出來的攝影機畫面（video）會被蓋住，變成黑畫面。 */
 
   /* ---------- 頂部提示橫幅 ---------- */
   #topBanner{
