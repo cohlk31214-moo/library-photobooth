@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>兒童室 KEYHOLE AR</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #hint {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 15; color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+    border-radius: 20px; font-size: 14px; display: none;
+  }
+  #statusBox {
+    position: fixed; top: 8px; left: 8px; z-index: 998;
+    color: #0f0; background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border-radius: 8px; font-size: 12px; font-family: monospace;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  #testBtn {
+    position: fixed; bottom: 16px; right: 16px; z-index: 998;
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.6); color: #fff; font-size: 20px; cursor: pointer;
+  }
+  video:not(.assetVideo) {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 1 !important;
+  }
+  canvas {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    z-index: 2 !important;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 導覽</button>
+<div id="hint">請將鏡頭對準鑰匙孔指標</div>
+<div id="statusBox">狀態: 尚未啟動</div>
+<div id="errBox"></div>
+<button id="testBtn" title="測試顯示影片(不需掃描)">🧪</button>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+let mindarThree = null;
+let started = false;
+let video, videoMesh, videoMaterial;
+
+// 這支影片是「左右拼接」格式：左半=原始彩色畫面，右半=灰階透明度遮罩(白=不透明、黑=全透明)
+// 這種做法用一般 H.264 MP4 就能在所有瀏覽器(含iPhone Safari)呈現「假透明」效果，不需要真的alpha通道
+const VIDEO_SRC = "./childrens-room-keyhole-effect.mp4";
+// 原始GIF尺寸 1190x1682，換算成單邊(去掉遮罩那半)的寬高比
+const VIDEO_ASPECT = 1190 / 1682;
+const VIDEO_WORLD_HEIGHT = 0.3; // 依實際書封尺寸自行調整
+
+function setStatus(msg) {
+  const box = document.getElementById("statusBox");
+  if (box) box.textContent = "狀態: " + msg;
+}
+
+// 強制修正MindAR產生的攝影機畫面/畫布，避免任何外層容器造成的黑邊
+function forceFullscreenFix() {
+  function apply(el) {
+    el.style.setProperty("position", "fixed", "important");
+    el.style.setProperty("top", "0", "important");
+    el.style.setProperty("left", "0", "important");
+    el.style.setProperty("width", "100vw", "important");
+    el.style.setProperty("height", "100vh", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("transform", "none", "important");
+    el.style.setProperty("object-fit", "cover", "important");
+  }
+  const v = document.querySelector("video:not(.assetVideo)");
+  const canvas = document.querySelector("canvas");
+  [v, canvas].forEach((el) => {
+    if (!el) return;
+    apply(el);
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("width", "100%", "important");
+      node.style.setProperty("height", "100%", "important");
+      node.style.setProperty("max-width", "none", "important");
+      node = node.parentElement;
+    }
+  });
+}
+
+// 建立video元素，並等metadata真的載好才建立VideoTexture，避免尺寸為0的問題
+function createVideoElement() {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.className = "assetVideo";
+    v.src = VIDEO_SRC;
+    v.crossOrigin = "anonymous";
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute("webkit-playsinline", "true");
+    v.style.display = "none";
+    document.body.appendChild(v);
+
+    v.addEventListener("loadedmetadata", () => resolve(v), { once: true });
+    v.addEventListener("error", () => reject(new Error("影片載入失敗: " + VIDEO_SRC)), { once: true });
+    v.load();
+  });
+}
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("hint").style.display = "block";
+  setStatus("初始化 MindAR...");
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: "./childrens-room-keyhole-targets.mind",
+    filterMinCF: 0.00005,
+    filterBeta: 0.0005,
+    uiScanning: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setClearColor(0x000000, 0);
+
+  setStatus("載入影片素材...");
+  video = await createVideoElement();
+
+  const videoTexture = new THREE.VideoTexture(video);
+  videoTexture.minFilter = THREE.LinearFilter;
+  videoTexture.magFilter = THREE.LinearFilter;
+
+  videoMaterial = new THREE.ShaderMaterial({
+    uniforms: { map: { value: videoTexture } },
+    transparent: true,
+    side: THREE.DoubleSide,
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      varying vec2 vUv;
+      void main() {
+        // 左半是顏色畫面，右半是灰階alpha遮罩
+        vec2 colorUv = vec2(vUv.x * 0.5, vUv.y);
+        vec2 alphaUv = vec2(vUv.x * 0.5 + 0.5, vUv.y);
+        vec3 color = texture2D(map, colorUv).rgb;
+        float alpha = texture2D(map, alphaUv).r;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `
+  });
+
+  const h = VIDEO_WORLD_HEIGHT;
+  const w = h * VIDEO_ASPECT;
+  const geometry = new THREE.PlaneGeometry(w, h);
+  videoMesh = new THREE.Mesh(geometry, videoMaterial);
+  videoMesh.visible = false;
+
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(videoMesh);
+
+  anchor.onTargetFound = () => {
+    document.getElementById("hint").style.display = "none";
+    setStatus("已偵測到目標，播放動線導引效果");
+    videoMesh.visible = true;
+    video.currentTime = 0;
+    video.play().catch((err) => showErr("[video.play失敗] " + err.message));
+  };
+  anchor.onTargetLost = () => {
+    document.getElementById("hint").style.display = "block";
+    setStatus("鏡頭運作中，掃描目標中...");
+    videoMesh.visible = false;
+    video.pause();
+  };
+
+  try {
+    await mindarThree.start();
+    setStatus("鏡頭運作中，掃描目標中...");
+    forceFullscreenFix();
+    setTimeout(forceFullscreenFix, 300);
+    setTimeout(forceFullscreenFix, 1000);
+    window.addEventListener("resize", forceFullscreenFix);
+    window.addEventListener("orientationchange", forceFullscreenFix);
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    setStatus("啟動失敗");
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("hint").style.display = "none";
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+  });
+}
+
+// 測試按鈕：不用掃描書封，直接切到鏡頭前方看效果，方便除錯
+document.getElementById("testBtn").addEventListener("click", () => {
+  if (!videoMesh || !video) {
+    showErr("[測試按鈕] AR 尚未啟動，請先點「點擊開始 AR 導覽」");
+    return;
+  }
+  videoMesh.visible = !videoMesh.visible;
+  if (videoMesh.visible) {
+    videoMesh.position.set(0, 0, -0.5);
+    video.currentTime = 0;
+    video.play().catch((err) => showErr("[測試play失敗] " + err.message));
+    setStatus("測試模式: 影片顯示中 (readyState=" + video.readyState + ")");
+  } else {
+    video.pause();
+    setStatus("測試模式: 已隱藏影片");
+  }
+});
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+</script>
+
+</body>
+</html>
