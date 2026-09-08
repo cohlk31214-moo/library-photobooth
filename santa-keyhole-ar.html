@@ -14,10 +14,12 @@
      等豐富細節，方便 MindAR 辨識；純黑色鑰匙孔剪影細節太少，容易認不到）
      拿去官方線上編譯工具轉成 .mind 檔：
          https://hiukim.github.io/mind-ar-js-doc/tools/compile
-     編譯完成後下載 targets.mind，和這個 html 放在同一個 GitHub 資料夾。
+     編譯完成後下載 .mind 檔，改名為 xmas-keyhole-targets.mind，
+     和這個 html 放在同一個 GitHub 資料夾。
 
-  2. 下面 <a-scene mindar-image="imageTargetSrc: ./targets.mind ...">
-     這一行的路徑要跟你上傳的 targets.mind 檔名/路徑一致。
+  2. 下面 <a-scene mindar-image="imageTargetSrc: ./xmas-keyhole-targets.mind ...">
+     這一行的路徑要跟你上傳的 .mind 檔名/路徑一致。
+     （之後如果還要再改檔名，記得這裡也要跟著改。）
 
   3. 把 keyhole-trigger.png 實際印出來，貼在「兒童室入口正中央」
      （對應你給的參考圖1構圖：鑰匙孔在拱門中間）。
@@ -174,7 +176,7 @@
 <!-- ============== MindAR 場景 ============== -->
 <a-scene
   id="arScene"
-  mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiScanning: no; uiLoading: no; filterMinCF:0.0001; filterBeta: 0.01;"
+  mindar-image="imageTargetSrc: ./xmas-keyhole-targets.mind; autoStart: false; uiScanning: no; uiLoading: no; filterMinCF:0.0001; filterBeta: 0.01;"
   color-space="sRGB"
   renderer="colorManagement: true, physicallyCorrectLights"
   vr-mode-ui="enabled: false"
