@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>兒童室入口 AR</title>
+
+<!--
+  =====================================================================
+  入口 AR 專用版本（已移除尋寶線索卡片，先專心把這一關做對）
+
+  流程：開鏡頭 → 對準入口（兒童室書架走道）→ 掃到後播放
+        keyhole-animation.gif（約 5.5 秒）→ 播完淡出
+
+  需要放同一個 GitHub 資料夾的檔案：
+  - entrance-ar.html（這個檔案）
+  - xmas-keyhole-targets.mind
+  - keyhole-animation.gif
+  =====================================================================
+-->
+
+<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+<style>
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    font-family:"PingFang TC","Noto Sans CJK TC","Microsoft JhengHei",sans-serif;
+  }
+  /* 注意：a-scene 不加任何 position / z-index / background，
+     完全交給 mindar-image-aframe 自己控制版面與攝影機畫面層級，
+     避免蓋住鏡頭畫面變成黑畫面 */
+
+  #topBanner{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    padding:14px 16px calc(14px + env(safe-area-inset-top,0px));
+    text-align:center; color:#fffdf7;
+    background:linear-gradient(180deg, rgba(20,20,20,.55), rgba(20,20,20,0));
+    pointer-events:none;
+  }
+  #topBanner h1{ margin:0; font-size:17px; letter-spacing:1px; text-shadow:0 2px 6px rgba(0,0,0,.5); }
+  #topBanner p{ margin:6px 0 0; font-size:13px; opacity:.9; }
+
+  #startScreen{
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 20%, #1c3b2e 0%, #0c1712 70%);
+    color:#fffdf7; text-align:center; padding:24px; box-sizing:border-box;
+  }
+  #startScreen .deco{ font-size:46px; margin-bottom:6px; }
+  #startScreen h1{ font-size:22px; margin:0 0 10px; }
+  #startScreen p{ font-size:14px; line-height:1.7; opacity:.9; max-width:300px; margin:0 auto 26px; }
+  #startBtn{
+    padding:14px 34px; font-size:17px; font-weight:bold;
+    border:none; border-radius:999px; cursor:pointer;
+    background:linear-gradient(135deg,#d6203f,#a4162f);
+    color:#fff; box-shadow:0 8px 20px rgba(214,32,63,.45);
+  }
+
+  #scanHint{
+    position:fixed; left:50%; bottom:calc(30px + env(safe-area-inset-bottom,0px));
+    transform:translateX(-50%);
+    z-index:20; color:#fffdf7; font-size:13px; text-align:center;
+    background:rgba(0,0,0,.45); padding:8px 16px; border-radius:999px;
+    pointer-events:none; opacity:0; transition:opacity .3s ease;
+  }
+  #scanHint.show{ opacity:1; }
+
+  #keyholeAnim{
+    position:fixed; left:50%; top:50%; z-index:15;
+    width:62vw; max-width:420px;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    opacity:0; transition:opacity .25s ease;
+  }
+  #keyholeAnim.show{ opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="deco">🎅🔑</div>
+  <h1>兒童室入口 AR</h1>
+  <p>請把手機鏡頭對準兒童室入口，<br>看看會發生什麼事！</p>
+  <button id="startBtn">開始 AR</button>
+</div>
+
+<div id="topBanner">
+  <h1>🎄 兒童室入口 AR 🎁</h1>
+  <p>請將鏡頭對準入口</p>
+</div>
+
+<div id="scanHint">🔍 掃描中，請對準入口…</div>
+
+<img id="keyholeAnim" src="./keyhole-animation.gif" alt="">
+
+<a-scene
+  id="arScene"
+  mindar-image="imageTargetSrc: ./xmas-keyhole-targets.mind; autoStart: false; uiScanning: no; uiLoading: no;"
+  renderer="colorManagement: true, physicallyCorrectLights, alpha: true"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false"
+>
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+  <a-entity id="target0" mindar-image-target="targetIndex: 0"></a-entity>
+</a-scene>
+
+<script>
+(function(){
+  const startScreen = document.getElementById('startScreen');
+  const startBtn     = document.getElementById('startBtn');
+  const scene        = document.getElementById('arScene');
+  const scanHint     = document.getElementById('scanHint');
+  const target0      = document.getElementById('target0');
+  const keyholeAnim  = document.getElementById('keyholeAnim');
+
+  target0.addEventListener('targetFound', () => {
+    scanHint.classList.remove('show');
+    keyholeAnim.classList.add('show');
+  });
+
+  target0.addEventListener('targetLost', () => {
+    keyholeAnim.classList.remove('show');
+    scanHint.classList.add('show');
+  });
+
+  startBtn.addEventListener('click', () => {
+    startScreen.style.display = 'none';
+    scanHint.classList.add('show');
+    if(scene.hasLoaded){
+      scene.systems['mindar-image-system'].start();
+    } else {
+      scene.addEventListener('loaded', () => {
+        scene.systems['mindar-image-system'].start();
+      });
+    }
+  });
+})();
+</script>
+</body>
+</html>
