@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>入口 AR 除錯版</title>
+
+<!--
+  =====================================================================
+  這是除錯專用版本，拿掉了尋寶線索畫面，
+  只保留：開鏡頭 → 掃到入口 target → 播放你的鑰匙孔動畫 GIF
+  畫面最上面會有一個黑底文字的「除錯訊息框」，
+  把每個步驟印出來，這樣手機上就能直接看到卡在哪一步，
+  不用另外接電腦看 Console。
+
+  請把這個檔案跟以下兩個檔案放同一個 GitHub 資料夾：
+  - xmas-keyhole-targets.mind
+  - keyhole-animation.gif
+  =====================================================================
+-->
+
+<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+<style>
+  html,body{ margin:0; padding:0; height:100%; overflow:hidden; background:#000;
+    font-family:-apple-system,"PingFang TC",sans-serif; }
+  a-scene{ position:fixed; inset:0; z-index:1; }
+
+  #debugBox{
+    position:fixed; top:0; left:0; right:0; z-index:100;
+    max-height:46vh; overflow-y:auto;
+    background:rgba(0,0,0,.85); color:#0f0;
+    font-family:"SF Mono",Menlo,Consolas,monospace;
+    font-size:11px; line-height:1.5; padding:8px 10px;
+    padding-top:calc(8px + env(safe-area-inset-top,0px));
+    white-space:pre-wrap; word-break:break-all;
+  }
+  #debugBox .err{ color:#ff5c5c; }
+  #debugBox .warn{ color:#ffd35c; }
+  #debugBox .ok{ color:#5cff8f; }
+
+  #startBtn{
+    position:fixed; left:50%; bottom:8vh; transform:translateX(-50%);
+    z-index:50; padding:14px 30px; font-size:16px; font-weight:bold;
+    border:none; border-radius:999px; background:#d6203f; color:#fff;
+  }
+
+  #keyholeAnim{
+    position:fixed; left:50%; top:56%; z-index:15;
+    width:62vw; max-width:420px;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    opacity:0; transition:opacity .25s ease;
+  }
+  #keyholeAnim.show{ opacity:1; }
+</style>
+</head>
+<body>
+
+<div id="debugBox">== 除錯訊息 ==\n</div>
+
+<button id="startBtn">開始 AR（除錯模式）</button>
+
+<img id="keyholeAnim" src="./keyhole-animation.gif" alt="">
+
+<a-scene
+  id="arScene"
+  mindar-image="imageTargetSrc: ./xmas-keyhole-targets.mind; autoStart: false; uiScanning: no; uiLoading: no;"
+  color-space="sRGB"
+  renderer="colorManagement: true, physicallyCorrectLights"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false"
+  embedded
+>
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+  <a-entity id="target0" mindar-image-target="targetIndex: 0"></a-entity>
+</a-scene>
+
+<script>
+(function(){
+  const debugBox = document.getElementById('debugBox');
+  function log(msg, type){
+    const line = document.createElement('div');
+    if(type) line.className = type;
+    const t = new Date().toLocaleTimeString('en-GB');
+    line.textContent = `[${t}] ${msg}`;
+    debugBox.appendChild(line);
+    debugBox.scrollTop = debugBox.scrollHeight;
+  }
+
+  window.addEventListener('error', (e) => {
+    log('JS 錯誤: ' + (e.message || e.error) + '  @' + (e.filename||'') + ':' + (e.lineno||''), 'err');
+  });
+  window.addEventListener('unhandledrejection', (e) => {
+    log('未處理的 Promise 錯誤: ' + (e.reason && e.reason.message ? e.reason.message : e.reason), 'err');
+  });
+
+  log('頁面開始載入…');
+
+  window.addEventListener('load', () => {
+    log('window.load 完成', 'ok');
+    log('aframe 是否存在: ' + (typeof AFRAME !== 'undefined'), typeof AFRAME !== 'undefined' ? 'ok' : 'err');
+    if(typeof AFRAME !== 'undefined'){
+      log('AFRAME 版本: ' + AFRAME.version);
+      log('mindar-image 元件是否註冊: ' + (!!AFRAME.components['mindar-image']), (!!AFRAME.components['mindar-image']) ? 'ok' : 'err');
+    }
+  });
+
+  const scene = document.getElementById('arScene');
+  const target0 = document.getElementById('target0');
+  const keyholeAnim = document.getElementById('keyholeAnim');
+  const startBtn = document.getElementById('startBtn');
+
+  scene.addEventListener('loaded', () => log('a-scene loaded 事件觸發', 'ok'));
+
+  scene.addEventListener('arReady', () => log('MindAR: arReady（target 檔已載入、系統就緒）', 'ok'));
+  scene.addEventListener('arError', (e) => log('MindAR: arError！target 檔可能載入失敗: ' + JSON.stringify(e.detail||{}), 'err'));
+
+  target0.addEventListener('targetFound', () => {
+    log('★ targetFound：掃到入口了！', 'ok');
+    keyholeAnim.classList.add('show');
+  });
+  target0.addEventListener('targetLost', () => {
+    log('targetLost：離開目標範圍', 'warn');
+    keyholeAnim.classList.remove('show');
+  });
+
+  startBtn.addEventListener('click', async () => {
+    log('點擊「開始 AR」…');
+    try{
+      log('嘗試啟動 mindar-image-system…');
+      if(scene.hasLoaded){
+        scene.systems['mindar-image-system'].start();
+        log('已呼叫 start()', 'ok');
+      } else {
+        log('scene 尚未 loaded，掛上 loaded 事件等待…', 'warn');
+        scene.addEventListener('loaded', () => {
+          scene.systems['mindar-image-system'].start();
+          log('（延遲）已呼叫 start()', 'ok');
+        });
+      }
+    }catch(err){
+      log('啟動時發生例外: ' + err.message, 'err');
+    }
+
+    // 額外：每 2 秒檢查一次 video 元素狀態，確認鏡頭畫面到底有沒有進來
+    let checkCount = 0;
+    const checkTimer = setInterval(() => {
+      checkCount++;
+      const video = document.querySelector('a-scene video');
+      if(!video){
+        log('檢查#' + checkCount + '：畫面中還沒有 <video> 元素', 'warn');
+      } else {
+        log('檢查#' + checkCount + '：video 狀態 readyState=' + video.readyState +
+            ' size=' + video.videoWidth + 'x' + video.videoHeight +
+            ' srcObject=' + (!!video.srcObject) +
+            ' paused=' + video.paused, video.videoWidth > 0 ? 'ok' : 'warn');
+      }
+      if(checkCount >= 8) clearInterval(checkTimer);
+    }, 2000);
+
+    startBtn.style.display = 'none';
+  });
+
+  log('腳本初始化完成，等待你點擊按鈕', 'ok');
+})();
+</script>
+</body>
+</html>
