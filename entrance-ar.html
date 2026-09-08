@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>兒童室 AR 尋書大冒險｜聖誕鑰匙孔</title>
+
+<!--
+  =====================================================================
+  這個版本改用「直接疊加透明 GIF」的做法，比上一版簡單很多：
+  - 不用切很多張 PNG，直接用你 Canva 匯出的 keyhole-animation.gif
+  - GIF 掃到 target 後自動播放一次（約 5.5 秒），播完自動閃白、
+    接著顯示尋寶線索卡片
+  - 這個 GIF 是「平貼在螢幕中央」顯示，不是 3D 立體貼在鑰匙孔上，
+    因為入口鑰匙孔是貼在牆上的平面，用這種方式最簡單、也最穩定
+
+  你需要準備的檔案（跟這個 html 放同一個 GitHub 資料夾）：
+  1. entrance-ar.html          ← 這個檔案
+  2. xmas-keyhole-targets.mind ← 你已經給過的 target 檔（沿用之前那個）
+  3. keyhole-animation.gif     ← 你這次給的透明背景動畫
+
+  如果之後動畫長度改變（不是 5.5 秒），
+  請把下面 JS 裡的 GIF_DURATION_MS 改成你新動畫的實際毫秒數。
+  =====================================================================
+-->
+
+<script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
+
+<style>
+  :root{
+    --xmas-red:#d6203f;
+    --xmas-green:#146e46;
+    --xmas-gold:#e6c15a;
+    --cream:#fffdf7;
+  }
+  html,body{
+    margin:0; padding:0; height:100%; overflow:hidden;
+    font-family:"PingFang TC","Noto Sans CJK TC","Microsoft JhengHei",sans-serif;
+    background:#000;
+  }
+  a-scene{ position:fixed; inset:0; z-index:1; }
+
+  /* ---------- 頂部提示橫幅 ---------- */
+  #topBanner{
+    position:fixed; top:0; left:0; right:0; z-index:20;
+    padding:14px 16px calc(14px + env(safe-area-inset-top,0px));
+    text-align:center; color:var(--cream);
+    background:linear-gradient(180deg, rgba(20,20,20,.65), rgba(20,20,20,0));
+    pointer-events:none;
+  }
+  #topBanner h1{ margin:0; font-size:18px; letter-spacing:1px; text-shadow:0 2px 6px rgba(0,0,0,.5); }
+  #topBanner p{ margin:6px 0 0; font-size:13px; opacity:.9; }
+
+  /* ---------- 開始畫面 ---------- */
+  #startScreen{
+    position:fixed; inset:0; z-index:50;
+    display:flex; flex-direction:column; align-items:center; justify-content:center;
+    background:radial-gradient(circle at 50% 20%, #1c3b2e 0%, #0c1712 70%);
+    color:var(--cream); text-align:center; padding:24px; box-sizing:border-box;
+  }
+  #startScreen .deco{ font-size:46px; margin-bottom:6px; }
+  #startScreen h1{ font-size:24px; margin:0 0 10px; }
+  #startScreen p{ font-size:14px; line-height:1.7; opacity:.9; max-width:320px; margin:0 auto 26px; }
+  #startBtn{
+    padding:14px 34px; font-size:17px; font-weight:bold;
+    border:none; border-radius:999px; cursor:pointer;
+    background:linear-gradient(135deg, var(--xmas-red), #a4162f);
+    color:#fff; box-shadow:0 8px 20px rgba(214,32,63,.45);
+  }
+  #permHint{ margin-top:16px; font-size:12px; opacity:.65; max-width:280px; }
+
+  /* ---------- 掃描提示 ---------- */
+  #scanHint{
+    position:fixed; left:50%; bottom:calc(30px + env(safe-area-inset-bottom,0px));
+    transform:translateX(-50%);
+    z-index:20; color:var(--cream); font-size:13px; text-align:center;
+    background:rgba(0,0,0,.45); padding:8px 16px; border-radius:999px;
+    pointer-events:none; opacity:0; transition:opacity .3s ease;
+  }
+  #scanHint.show{ opacity:1; }
+
+  /* ---------- 疊加的鑰匙孔動畫 GIF ---------- */
+  #keyholeAnim{
+    position:fixed; left:50%; top:50%; z-index:15;
+    width:62vw; max-width:420px;
+    transform:translate(-50%,-50%);
+    pointer-events:none;
+    opacity:0; transition:opacity .25s ease;
+  }
+  #keyholeAnim.show{ opacity:1; }
+
+  /* ---------- 白閃 ---------- */
+  #flash{
+    position:fixed; inset:0; z-index:80;
+    background:#fff; opacity:0; pointer-events:none;
+  }
+
+  /* ---------- 線索卡片 ---------- */
+  #clueScreen{
+    position:fixed; inset:0; z-index:70;
+    display:none; align-items:center; justify-content:center;
+    padding:24px; box-sizing:border-box;
+    background:radial-gradient(circle at 50% 10%, #24483a 0%, #0c1712 75%);
+  }
+  #clueCard{
+    width:100%; max-width:380px;
+    background:var(--cream); border-radius:22px; padding:26px 22px 24px;
+    box-shadow:0 20px 50px rgba(0,0,0,.5);
+    text-align:center; position:relative;
+    border:3px solid var(--xmas-gold);
+    animation:popIn .5s cubic-bezier(.2,1.4,.4,1) both;
+  }
+  @keyframes popIn{
+    0%{ transform:scale(.7); opacity:0; }
+    100%{ transform:scale(1); opacity:1; }
+  }
+  #clueCard .badge{ font-size:44px; margin-bottom:6px; }
+  #clueCard h2{ margin:0 0 4px; color:var(--xmas-red); font-size:20px; }
+  #clueCard h3{ margin:0 0 14px; color:var(--xmas-green); font-size:15px; font-weight:600; }
+  #clueCard .callno{
+    display:inline-block; margin:6px 0 16px; padding:6px 14px;
+    background:var(--xmas-green); color:#fff; border-radius:8px;
+    font-weight:bold; letter-spacing:1px; font-size:15px;
+  }
+  #clueCard p{ font-size:14px; line-height:1.8; color:#333; margin:0 0 6px; text-align:left; }
+  #againBtn{
+    margin-top:18px; padding:11px 26px; font-size:14px; font-weight:bold;
+    border:none; border-radius:999px; cursor:pointer;
+    background:var(--xmas-red); color:#fff;
+  }
+</style>
+</head>
+<body>
+
+<div id="startScreen">
+  <div class="deco">🎅🔑</div>
+  <h1>兒童室聖誕尋寶大冒險</h1>
+  <p>
+    請把手機鏡頭對準兒童室入口的「聖誕鑰匙孔」立牌，<br>
+    看看聖誕老公公為你準備了什麼任務！
+  </p>
+  <button id="startBtn">開始 AR 尋寶</button>
+  <div id="permHint">點擊後請允許使用相機權限</div>
+</div>
+
+<div id="topBanner">
+  <h1>🎄 AR 尋書闖關大冒險 🎁</h1>
+  <p>請將鏡頭對準兒童室入口的鑰匙孔圖示</p>
+</div>
+
+<div id="scanHint">🔍 掃描中，請對準鑰匙孔標誌…</div>
+
+<!-- 你的 Canva 透明背景動畫，掃到 target 才會顯示 -->
+<img id="keyholeAnim" src="./keyhole-animation.gif" alt="">
+
+<!-- MindAR 場景：只用來偵測 target，不放 3D 內容 -->
+<a-scene
+  id="arScene"
+  mindar-image="imageTargetSrc: ./xmas-keyhole-targets.mind; autoStart: false; uiScanning: no; uiLoading: no; filterMinCF:0.0001; filterBeta: 0.01;"
+  color-space="sRGB"
+  renderer="colorManagement: true, physicallyCorrectLights"
+  vr-mode-ui="enabled: false"
+  device-orientation-permission-ui="enabled: false"
+  embedded
+>
+  <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+  <a-entity id="target0" mindar-image-target="targetIndex: 0"></a-entity>
+</a-scene>
+
+<div id="flash"></div>
+
+<div id="clueScreen">
+  <div id="clueCard">
+    <div class="badge">🎁</div>
+    <h2>叮咚！大門打開了</h2>
+    <h3>聖誕老公公的第一個任務：</h3>
+    <div class="callno">000－099</div>
+    <p>
+      聖誕老公公說：「北極秘密基地的地圖，
+      藏在圖書館最厲害的『百科全書』裡！」<br><br>
+      請你到<strong>總類（0類）書架</strong>，
+      找一本封面有地球或地圖圖案的書，
+      翻開目錄，看看第一個線索是不是在等你？
+    </p>
+    <button id="againBtn">再玩一次</button>
+  </div>
+</div>
+
+<script>
+(function(){
+  const startScreen = document.getElementById('startScreen');
+  const startBtn     = document.getElementById('startBtn');
+  const scene        = document.getElementById('arScene');
+  const scanHint     = document.getElementById('scanHint');
+  const target0      = document.getElementById('target0');
+  const keyholeAnim  = document.getElementById('keyholeAnim');
+  const flash        = document.getElementById('flash');
+  const clueScreen   = document.getElementById('clueScreen');
+  const againBtn     = document.getElementById('againBtn');
+  const topBanner    = document.getElementById('topBanner');
+
+  // ★ 你的 GIF 實際長度（毫秒），量測後大約 5.5 秒。
+  //   如果之後換了新動畫，記得改這個數字。
+  const GIF_DURATION_MS = 5500;
+
+  const FLASH_IN_MS   = 160;
+  const FLASH_HOLD_MS = 160;
+  const FLASH_OUT_MS  = 420;
+
+  let sequenceRunning = false;
+  let sequenceDone = false;
+  let gifTimer = null;
+
+  function resetSequence(){
+    sequenceRunning = false;
+    sequenceDone = false;
+    if(gifTimer) clearTimeout(gifTimer);
+    keyholeAnim.classList.remove('show');
+    // 重設 GIF 讓它從第一格重新播放
+    const src = keyholeAnim.src;
+    keyholeAnim.src = '';
+    keyholeAnim.src = src;
+    flash.style.opacity = 0;
+    clueScreen.style.display = 'none';
+  }
+
+  function runSequence(){
+    if(sequenceRunning || sequenceDone) return;
+    sequenceRunning = true;
+    keyholeAnim.classList.add('show');
+
+    gifTimer = setTimeout(() => {
+      triggerFlash();
+    }, GIF_DURATION_MS);
+  }
+
+  function triggerFlash(){
+    flash.style.transition = `opacity ${FLASH_IN_MS}ms ease-in`;
+    flash.style.opacity = 1;
+    setTimeout(() => {
+      flash.style.transition = `opacity ${FLASH_OUT_MS}ms ease-out`;
+      flash.style.opacity = 0;
+      showClueScreen();
+    }, FLASH_IN_MS + FLASH_HOLD_MS);
+  }
+
+  function showClueScreen(){
+    sequenceDone = true;
+    keyholeAnim.classList.remove('show');
+    topBanner.style.display = 'none';
+    scanHint.classList.remove('show');
+    clueScreen.style.display = 'flex';
+  }
+
+  target0.addEventListener('targetFound', () => {
+    scanHint.classList.remove('show');
+    if(!sequenceDone){
+      runSequence();
+    }
+  });
+
+  target0.addEventListener('targetLost', () => {
+    if(!sequenceDone){
+      sequenceRunning = false;
+      if(gifTimer) clearTimeout(gifTimer);
+      keyholeAnim.classList.remove('show');
+    }
+    scanHint.classList.add('show');
+  });
+
+  startBtn.addEventListener('click', async () => {
+    startScreen.style.display = 'none';
+    scanHint.classList.add('show');
+    if(scene.hasLoaded){
+      scene.systems['mindar-image-system'].start();
+    } else {
+      scene.addEventListener('loaded', () => {
+        scene.systems['mindar-image-system'].start();
+      });
+    }
+  });
+
+  againBtn.addEventListener('click', () => {
+    clueScreen.style.display = 'none';
+    topBanner.style.display = 'block';
+    resetSequence();
+    scanHint.classList.add('show');
+  });
+})();
+</script>
+</body>
+</html>
