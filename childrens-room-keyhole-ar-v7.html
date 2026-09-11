@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>兒童室 KEYHOLE AR v7</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #hint {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 15; color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+    border-radius: 20px; font-size: 14px; display: none;
+  }
+  #statusBox {
+    position: fixed; top: 8px; left: 8px; z-index: 998;
+    color: #0f0; background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border-radius: 8px; font-size: 12px; font-family: monospace;
+    max-width: 70vw;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  /* ---- 現場校正面板：測試/縮放/上下位置，方便到現場直接微調不用重新部署 ---- */
+  #calibPanel {
+    position: fixed; bottom: 16px; right: 16px; z-index: 998;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  .calibRow {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(0,0,0,0.55); border-radius: 20px; padding: 6px 10px;
+  }
+  .calibRow span {
+    color: #fff; font-size: 12px; font-family: monospace; min-width: 78px; text-align: center;
+  }
+  .calibBtn {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: #ff2d78; color: #fff; font-size: 18px; font-weight: bold; cursor: pointer;
+  }
+  #testBtn, #previewIntroBtn {
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.6); color: #fff; font-size: 20px; cursor: pointer;
+  }
+  video:not(.assetVideo):not(#introVideo) {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 1 !important;
+  }
+  canvas {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    z-index: 2 !important;
+  }
+
+  /* ---- 影片播完一輪後：閃光 + 任務說明彈窗(動畫版)，純2D UI，不受AR尺寸/位置校正影響 ---- */
+  #flashOverlay {
+    position: fixed; inset: 0; background: #fff; opacity: 0;
+    z-index: 50; pointer-events: none; transition: opacity 0.12s ease-out;
+  }
+  /* 這裡背景改成跟任務說明影片底色完全一樣的實色(#1f1710)，
+     這樣影片透明破邊的羊皮紙邊緣才會跟背景無縫接在一起，不用真的alpha通道 */
+  #introOverlay {
+    position: fixed; inset: 0; z-index: 45;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+    background: #1f1710; opacity: 0; pointer-events: none;
+    transition: opacity 1.4s ease;
+  }
+  #introOverlay.show { opacity: 1; pointer-events: auto; }
+  #introVideo {
+    max-width: 86vw; max-height: 68vh; border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #enterQuestBtn {
+    padding: 16px 40px; font-size: 20px; font-weight: bold;
+    background: #f2c14e; color: #3a2a10; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5); cursor: pointer;
+    opacity: 0; transition: opacity 0.6s ease;
+  }
+  #enterQuestBtn.show { opacity: 1; }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 導覽</button>
+<div id="hint">請將鏡頭對準鑰匙孔指標</div>
+<div id="statusBox">狀態: 尚未啟動</div>
+<div id="errBox"></div>
+
+<div id="flashOverlay"></div>
+<div id="introOverlay">
+  <video id="introVideo" class="assetVideo" src="./childrens-room-keyhole-quest-intro.mp4" muted playsinline webkit-playsinline="true"></video>
+  <button id="enterQuestBtn">🔑 進入尋寶</button>
+</div>
+
+<div id="calibPanel">
+  <div class="calibRow">
+    <button class="calibBtn" id="sizeDown">－</button>
+    <span id="sizeLabel">尺寸 1.00x</span>
+    <button class="calibBtn" id="sizeUp">＋</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="posDown">↓</button>
+    <span id="posLabel">高度 0.00</span>
+    <button class="calibBtn" id="posUp">↑</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="zDown">－</button>
+    <span id="zLabel">深度 0.00</span>
+    <button class="calibBtn" id="zUp">＋</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="xDown">←</button>
+    <span id="xLabel">左右 0.00</span>
+    <button class="calibBtn" id="xUp">→</button>
+  </div>
+  <button id="testBtn" title="測試顯示效果(不需掃描)">🧪</button>
+  <button id="previewIntroBtn" title="手動預覽任務說明彈窗">📜</button>
+</div>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+let mindarThree = null;
+let started = false;
+let anchorRef = null;
+let isTestMode = false;
+
+// 鑰匙孔+文字：單層、不做三層疊加
+const SINGLE_VIDEO_SRC = "./childrens-room-keyhole-single-effect.mp4";
+// 煙火(彩色噴濺)：三層前後交錯
+const FIREWORKS_VIDEO_SRC = "./childrens-room-keyhole-fireworks-effect.mp4";
+const VIDEO_ASPECT = 1190 / 1682; // 原始GIF單邊寬高比
+
+// === 現場校正的起始值：這些是「猜測的起點」，實際大小要看書封標記在現場的真實尺寸 ===
+const BASE_HEIGHT = 1.6;
+const SIZE_STEP = 1.15; // 每按一次，尺寸 x1.15 或 /1.15
+const POS_STEP = 0.12;  // 每按一次，往上/下移動這麼多(單位跟BASE_HEIGHT同一套世界座標)
+const Z_STEP = 0.03;    // 前後深度微調
+const X_STEP = 0.05;    // 左右微調
+
+// 煙火3層前後交錯的設定，做出「煙火感」的層次：
+// zOffset 沿著鏡頭方向前後錯開；scaleMul 各層相對主尺寸的比例；
+// opacity 各層不透明度(後層淡一點更有空間感)；timeOffsetRatio 各層播放進度錯開(0~1，乘上影片長度)
+const LAYERS = [
+  { name: "後層", zOffset: -0.35, scaleMul: 0.80, opacity: 0.45, timeOffsetRatio: 0.0 },
+  { name: "中層", zOffset: -0.05, scaleMul: 1.00, opacity: 0.85, timeOffsetRatio: 0.33 },
+  { name: "前層", zOffset: 0.30,  scaleMul: 1.20, opacity: 1.00, timeOffsetRatio: 0.66 },
+];
+// LAYERS[1]（中層）當作「播完一輪」的計時參考點
+const REFERENCE_LAYER_INDEX = 1;
+
+// 淡出動畫(按下「進入尋寶」後)的時間長度
+const FADE_OUT_MS = 1500;
+
+let parentGroup;    // 最外層容器(鑰匙孔單層 + 煙火3層 都在裡面)，校正面板控制這一層
+let fireworksGroup; // 煙火3層的容器(掛在parentGroup底下)
+let singleMesh;     // 鑰匙孔+文字的單層mesh
+let singleVideo;    // 對應的video元素
+let sizeMultiplier = 1.0;
+let yOffset = BASE_HEIGHT * 0.35; // 預設把整組往上抬一點，模擬「從地面往上冒到天花板」的感覺
+let zOffset = 0;
+let xOffset = 0;
+let layerRefs = [];  // { video, mesh, layer } (煙火3層)
+let introTimer = null;
+let introShownThisSession = false;
+
+function setStatus(msg) {
+  const box = document.getElementById("statusBox");
+  if (box) box.textContent = "狀態: " + msg;
+}
+
+function updateCalibLabels() {
+  document.getElementById("sizeLabel").textContent = "尺寸 " + sizeMultiplier.toFixed(2) + "x";
+  document.getElementById("posLabel").textContent = "高度 " + yOffset.toFixed(2);
+  document.getElementById("zLabel").textContent = "深度 " + zOffset.toFixed(2);
+  document.getElementById("xLabel").textContent = "左右 " + xOffset.toFixed(2);
+}
+
+function applyZPosition() {
+  if (!parentGroup) return;
+  const base = isTestMode ? -2.0 : 0;
+  parentGroup.position.z = base + zOffset;
+}
+
+function applyCalibration() {
+  if (!parentGroup) return;
+  parentGroup.scale.setScalar(sizeMultiplier);
+  parentGroup.position.y = yOffset;
+  parentGroup.position.x = xOffset;
+  applyZPosition();
+  updateCalibLabels();
+}
+
+// 強制修正MindAR產生的攝影機畫面/畫布，避免任何外層容器造成的黑邊
+function forceFullscreenFix() {
+  function apply(el) {
+    el.style.setProperty("position", "fixed", "important");
+    el.style.setProperty("top", "0", "important");
+    el.style.setProperty("left", "0", "important");
+    el.style.setProperty("width", "100vw", "important");
+    el.style.setProperty("height", "100vh", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("transform", "none", "important");
+    el.style.setProperty("object-fit", "cover", "important");
+  }
+  const v = document.querySelector("video:not(.assetVideo)");
+  const canvas = document.querySelector("canvas");
+  [v, canvas].forEach((el) => {
+    if (!el) return;
+    apply(el);
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("width", "100%", "important");
+      node.style.setProperty("height", "100%", "important");
+      node.style.setProperty("max-width", "none", "important");
+      node = node.parentElement;
+    }
+  });
+}
+
+// 建立video元素，並等metadata真的載好才resolve，避免尺寸為0的問題
+function createVideoElement(src) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.className = "assetVideo";
+    v.src = src;
+    v.crossOrigin = "anonymous";
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute("webkit-playsinline", "true");
+    v.style.display = "none";
+    document.body.appendChild(v);
+
+    v.addEventListener("loadedmetadata", () => resolve(v), { once: true });
+    v.addEventListener("error", () => reject(new Error("影片載入失敗: " + src)), { once: true });
+    v.load();
+  });
+}
+
+function makeLayerMaterial(videoTexture, opacity) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: videoTexture },
+      opacity: { value: opacity },
+    },
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false, // 半透明多層疊加時避免互相遮擋出現奇怪的深度切割
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float opacity;
+      varying vec2 vUv;
+      void main() {
+        // 左半是顏色畫面，右半是灰階alpha遮罩
+        vec2 colorUv = vec2(vUv.x * 0.5, vUv.y);
+        vec2 alphaUv = vec2(vUv.x * 0.5 + 0.5, vUv.y);
+        vec3 color = texture2D(map, colorUv).rgb;
+        float alpha = texture2D(map, alphaUv).r * opacity;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `
+  });
+}
+
+async function buildScene() {
+  parentGroup = new THREE.Group();
+  fireworksGroup = new THREE.Group();
+
+  // ---- 1) 鑰匙孔+文字：單層，不做三層疊加 ----
+  singleVideo = await createVideoElement(SINGLE_VIDEO_SRC);
+  const singleTex = new THREE.VideoTexture(singleVideo);
+  singleTex.minFilter = THREE.LinearFilter;
+  singleTex.magFilter = THREE.LinearFilter;
+  const singleMaterial = makeLayerMaterial(singleTex, 1.0);
+  const sh = BASE_HEIGHT;
+  const sw = sh * VIDEO_ASPECT;
+  singleMesh = new THREE.Mesh(new THREE.PlaneGeometry(sw, sh), singleMaterial);
+  singleMesh.position.z = 0;
+  parentGroup.add(singleMesh);
+
+  // ---- 2) 煙火：三層前後交錯 ----
+  const videos = await Promise.all(LAYERS.map(() => createVideoElement(FIREWORKS_VIDEO_SRC)));
+
+  LAYERS.forEach((layer, i) => {
+    const v = videos[i];
+    const tex = new THREE.VideoTexture(v);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+
+    const material = makeLayerMaterial(tex, layer.opacity);
+    const h = BASE_HEIGHT * layer.scaleMul;
+    const w = h * VIDEO_ASPECT;
+    const geometry = new THREE.PlaneGeometry(w, h);
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.z = layer.zOffset;
+
+    fireworksGroup.add(mesh);
+    layerRefs.push({ video: v, mesh, layer });
+  });
+
+  parentGroup.add(fireworksGroup);
+  parentGroup.visible = false;
+  applyCalibration();
+  return parentGroup;
+}
+
+function playAllLayers() {
+  singleVideo.currentTime = 0;
+  singleVideo.play().catch((err) => showErr("[video.play失敗:單層] " + err.message));
+  layerRefs.forEach(({ video, layer }) => {
+    const dur = video.duration || 5.5;
+    video.currentTime = (layer.timeOffsetRatio * dur) % dur;
+    video.play().catch((err) => showErr("[video.play失敗:" + layer.name + "] " + err.message));
+  });
+}
+
+function pauseAllLayers() {
+  if (singleVideo) singleVideo.pause();
+  layerRefs.forEach(({ video }) => video.pause());
+}
+
+// 把整組(單層+煙火3層)的不透明度，從目前值平滑漸變到0，動畫結束後暫停、隱藏
+function fadeOutRiseGroup(durationMs, onDone) {
+  const startOpacities = layerRefs.map((r) => r.mesh.material.uniforms.opacity.value);
+  const singleStartOpacity = singleMesh.material.uniforms.opacity.value;
+  const startTime = performance.now();
+
+  function step(now) {
+    const t = Math.min((now - startTime) / durationMs, 1);
+    layerRefs.forEach((r, i) => {
+      r.mesh.material.uniforms.opacity.value = startOpacities[i] * (1 - t);
+    });
+    singleMesh.material.uniforms.opacity.value = singleStartOpacity * (1 - t);
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else {
+      pauseAllLayers();
+      parentGroup.visible = false;
+      // 還原回原本的不透明度數值，供下次重新掃描/測試時使用
+      layerRefs.forEach((r, i) => {
+        r.mesh.material.uniforms.opacity.value = startOpacities[i];
+      });
+      singleMesh.material.uniforms.opacity.value = singleStartOpacity;
+      if (onDone) onDone();
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+// ---- 閃光 + 任務說明彈窗(動畫版) ----
+function triggerIntroSequence() {
+  if (introShownThisSession) return;
+  introShownThisSession = true;
+
+  const flash = document.getElementById("flashOverlay");
+  const intro = document.getElementById("introOverlay");
+  const introVideo = document.getElementById("introVideo");
+  const enterBtn = document.getElementById("enterQuestBtn");
+
+  flash.style.opacity = "1";
+  setTimeout(() => {
+    flash.style.opacity = "0";
+    intro.classList.add("show");
+    introVideo.currentTime = 0;
+    introVideo.play().catch((err) => showErr("[任務說明影片播放失敗] " + err.message));
+    // 影片播放時先不顯示按鈕，等動畫播完(羊皮紙文字全部出現)才淡入按鈕，避免小朋友太早點掉
+    enterBtn.classList.remove("show");
+    const dur = (introVideo.duration || 5) * 1000;
+    setTimeout(() => enterBtn.classList.add("show"), dur);
+  }, 130);
+}
+
+// 影片一開始播放時，排定「播完一輪」的時間點去觸發閃光+彈窗
+function scheduleIntroAfterOneLoop() {
+  introShownThisSession = false;
+  if (introTimer) clearTimeout(introTimer);
+  const refVideo = layerRefs[REFERENCE_LAYER_INDEX].video;
+  const dur = refVideo.duration || 5.5;
+  introTimer = setTimeout(triggerIntroSequence, dur * 1000);
+}
+
+function cancelScheduledIntro() {
+  if (introTimer) {
+    clearTimeout(introTimer);
+    introTimer = null;
+  }
+}
+
+// 按下「進入尋寶」：任務說明彈窗 + 鑰匙孔煙火AR效果 一起緩緩淡出
+document.getElementById("enterQuestBtn").addEventListener("click", () => {
+  const intro = document.getElementById("introOverlay");
+  const enterBtn = document.getElementById("enterQuestBtn");
+  enterBtn.classList.remove("show");
+  intro.classList.remove("show"); // CSS transition 1.4s 慢慢淡出
+
+  if (parentGroup && parentGroup.visible) {
+    fadeOutRiseGroup(FADE_OUT_MS);
+  }
+
+  setTimeout(() => {
+    const introVideo = document.getElementById("introVideo");
+    introVideo.pause();
+    setStatus("鏡頭運作中，掃描目標中...");
+  }, 1500);
+});
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("hint").style.display = "block";
+  setStatus("初始化 MindAR...");
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: "./childrens-room-keyhole-targets.mind",
+    filterMinCF: 0.00005,
+    filterBeta: 0.0005,
+    uiScanning: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setClearColor(0x000000, 0);
+
+  setStatus("載入影片素材(單層鑰匙孔 + 3層煙火)...");
+  const group = await buildScene();
+
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(group);
+  anchorRef = anchor;
+
+  anchor.onTargetFound = () => {
+    document.getElementById("hint").style.display = "none";
+    setStatus("已偵測到目標，播放鑰匙孔+煙火效果");
+    group.visible = true;
+    playAllLayers();
+    // v6起: 暫時停用「播完一輪自動跳出任務說明」，先專心校正鑰匙孔位置/尺寸
+    // 等校正完成後，把下面這行的註解拿掉即可恢復
+    // scheduleIntroAfterOneLoop();
+  };
+  anchor.onTargetLost = () => {
+    document.getElementById("hint").style.display = "block";
+    setStatus("鏡頭運作中，掃描目標中...");
+    group.visible = false;
+    pauseAllLayers();
+    cancelScheduledIntro();
+  };
+
+  try {
+    await mindarThree.start();
+    setStatus("鏡頭運作中，掃描目標中...");
+    forceFullscreenFix();
+    setTimeout(forceFullscreenFix, 300);
+    setTimeout(forceFullscreenFix, 1000);
+    window.addEventListener("resize", forceFullscreenFix);
+    window.addEventListener("orientationchange", forceFullscreenFix);
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    setStatus("啟動失敗");
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("hint").style.display = "none";
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+  });
+}
+
+// ---- 現場校正面板事件 ----
+document.getElementById("sizeUp").addEventListener("click", () => {
+  sizeMultiplier *= SIZE_STEP;
+  applyCalibration();
+});
+document.getElementById("sizeDown").addEventListener("click", () => {
+  sizeMultiplier /= SIZE_STEP;
+  applyCalibration();
+});
+document.getElementById("posUp").addEventListener("click", () => {
+  yOffset += POS_STEP;
+  applyCalibration();
+});
+document.getElementById("posDown").addEventListener("click", () => {
+  yOffset -= POS_STEP;
+  applyCalibration();
+});
+document.getElementById("zUp").addEventListener("click", () => {
+  zOffset += Z_STEP;
+  applyCalibration();
+});
+document.getElementById("zDown").addEventListener("click", () => {
+  zOffset -= Z_STEP;
+  applyCalibration();
+});
+document.getElementById("xUp").addEventListener("click", () => {
+  xOffset += X_STEP;
+  applyCalibration();
+});
+document.getElementById("xDown").addEventListener("click", () => {
+  xOffset -= X_STEP;
+  applyCalibration();
+});
+
+// 測試按鈕：不用掃描書封，直接把整組效果放到鏡頭前方看，方便現場調整尺寸/高度/深度/左右
+// 注意：測試模式「不會」觸發閃光+任務說明彈窗，讓你可以不受時間限制、慢慢校正
+// (正式AR模式下，真的掃到書封target時，播完一輪還是會照常跳出任務說明)
+document.getElementById("testBtn").addEventListener("click", () => {
+  if (!parentGroup) {
+    showErr("[測試按鈕] AR 尚未啟動，請先點「點擊開始 AR 導覽」");
+    return;
+  }
+  parentGroup.visible = !parentGroup.visible;
+  isTestMode = parentGroup.visible;
+  if (parentGroup.visible) {
+    // 測試模式：強制讓anchor顯示(不然在還沒偵測到目標時MindAR預設會把它藏起來)
+    if (anchorRef) anchorRef.group.visible = true;
+    applyZPosition();
+    playAllLayers();
+    setStatus("測試模式: 效果顯示中(不會跳出任務說明)，可用四排按鈕慢慢調整");
+  } else {
+    applyZPosition();
+    pauseAllLayers();
+    setStatus("測試模式: 已隱藏效果");
+  }
+});
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+
+// 手動預覽任務說明彈窗：不管有沒有掃到target、也不管之前有沒有顯示過，按了就直接播放閃光+彈窗
+document.getElementById("previewIntroBtn").addEventListener("click", () => {
+  introShownThisSession = false;
+  triggerIntroSequence();
+});
+
+updateCalibLabels();
+</script>
+
+</body>
+</html>
