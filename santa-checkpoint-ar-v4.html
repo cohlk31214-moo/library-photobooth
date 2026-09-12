@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>9類聖誕老人 闖關站 AR v4</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #hint {
+    position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+    z-index: 15; color: #fff; background: rgba(0,0,0,0.55); padding: 8px 16px;
+    border-radius: 20px; font-size: 14px; display: none;
+  }
+  #statusBox {
+    position: fixed; top: 8px; left: 8px; z-index: 998;
+    color: #0f0; background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border-radius: 8px; font-size: 12px; font-family: monospace;
+    max-width: 70vw;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  /* ---- 現場校正面板：測試/縮放/上下/前後/左右位置，方便到現場直接微調不用重新部署 ---- */
+  #calibPanel {
+    position: fixed; bottom: 16px; right: 16px; z-index: 998;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
+  }
+  .calibRow {
+    display: flex; align-items: center; gap: 6px;
+    background: rgba(0,0,0,0.55); border-radius: 20px; padding: 6px 10px;
+  }
+  .calibRow span {
+    color: #fff; font-size: 12px; font-family: monospace; min-width: 78px; text-align: center;
+  }
+  .calibBtn {
+    width: 40px; height: 40px; border-radius: 50%; border: none;
+    background: #ff2d78; color: #fff; font-size: 18px; font-weight: bold; cursor: pointer;
+  }
+  #testBtn {
+    width: 48px; height: 48px; border-radius: 50%; border: none;
+    background: rgba(0,0,0,0.6); color: #fff; font-size: 20px; cursor: pointer;
+  }
+  video:not(.assetVideo) {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 1 !important;
+  }
+  canvas {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    z-index: 2 !important;
+  }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 導覽</button>
+<div id="hint">請將鏡頭對準聖誕老人指標</div>
+<div id="statusBox">狀態: 尚未啟動</div>
+<div id="errBox"></div>
+
+<div id="calibPanel">
+  <div class="calibRow">
+    <button class="calibBtn" id="sizeDown">－</button>
+    <span id="sizeLabel">尺寸 1.00x</span>
+    <button class="calibBtn" id="sizeUp">＋</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="posDown">↓</button>
+    <span id="posLabel">高度 0.00</span>
+    <button class="calibBtn" id="posUp">↑</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="zDown">－</button>
+    <span id="zLabel">深度 0.00</span>
+    <button class="calibBtn" id="zUp">＋</button>
+  </div>
+  <div class="calibRow">
+    <button class="calibBtn" id="xDown">←</button>
+    <span id="xLabel">左右 0.00</span>
+    <button class="calibBtn" id="xUp">→</button>
+  </div>
+  <button id="testBtn" title="測試顯示效果(不需掃描)">🧪</button>
+</div>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+let mindarThree = null;
+let started = false;
+let anchorRef = null;
+let santaMesh = null;
+let santaVideo = null;
+let isTestMode = false;
+
+// 這支影片是「左右拼接」格式：左半=原始彩色畫面(聖誕老人+禮物+文字)，右半=灰階透明度遮罩
+const VIDEO_SRC = "./santa-checkpoint-effect-v3.mp4";
+const VIDEO_ASPECT = 1190 / 1682; // 原始GIF單邊寬高比
+// 整支影片播放速度，1.0=原速。這版因為已經重新排過時間軸(進場→停頓→文字重新完整浮現)，
+// 節奏本身已經放慢調整過，所以先恢復正常速度，如果還是覺得太快，再告訴我要調到多少
+const PLAYBACK_RATE = 1.0;
+
+// === 現場校正的起始值：這是「猜測的起點」，實際大小要看target在現場的真實尺寸 ===
+const BASE_HEIGHT = 1.4;
+const SIZE_STEP = 1.15;
+const POS_STEP = 0.12;
+const Z_STEP = 0.03;
+const X_STEP = 0.05;
+
+// === 現場校正完成的數值(已寫死)：尺寸0.57x / 高度0.00 / 深度0.00 / 左右0.20 ===
+let sizeMultiplier = 0.57;
+let yOffset = 0.00;
+let zOffset = 0.00;
+let xOffset = 0.20;
+
+function setStatus(msg) {
+  const box = document.getElementById("statusBox");
+  if (box) box.textContent = "狀態: " + msg;
+}
+
+function updateCalibLabels() {
+  document.getElementById("sizeLabel").textContent = "尺寸 " + sizeMultiplier.toFixed(2) + "x";
+  document.getElementById("posLabel").textContent = "高度 " + yOffset.toFixed(2);
+  document.getElementById("zLabel").textContent = "深度 " + zOffset.toFixed(2);
+  document.getElementById("xLabel").textContent = "左右 " + xOffset.toFixed(2);
+}
+
+function applyZPosition() {
+  if (!santaMesh) return;
+  const base = isTestMode ? -1.5 : 0;
+  santaMesh.position.z = base + zOffset;
+}
+
+function applyCalibration() {
+  if (!santaMesh) return;
+  santaMesh.scale.setScalar(sizeMultiplier);
+  santaMesh.position.y = yOffset;
+  santaMesh.position.x = xOffset;
+  applyZPosition();
+  updateCalibLabels();
+}
+
+// 強制修正MindAR產生的攝影機畫面/畫布，避免任何外層容器造成的黑邊
+function forceFullscreenFix() {
+  function apply(el) {
+    el.style.setProperty("position", "fixed", "important");
+    el.style.setProperty("top", "0", "important");
+    el.style.setProperty("left", "0", "important");
+    el.style.setProperty("width", "100vw", "important");
+    el.style.setProperty("height", "100vh", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("transform", "none", "important");
+    el.style.setProperty("object-fit", "cover", "important");
+  }
+  const v = document.querySelector("video:not(.assetVideo)");
+  const canvas = document.querySelector("canvas");
+  [v, canvas].forEach((el) => {
+    if (!el) return;
+    apply(el);
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("width", "100%", "important");
+      node.style.setProperty("height", "100%", "important");
+      node.style.setProperty("max-width", "none", "important");
+      node = node.parentElement;
+    }
+  });
+}
+
+// 建立video元素，並等metadata真的載好才resolve，避免尺寸為0的問題
+function createVideoElement() {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.className = "assetVideo";
+    v.src = VIDEO_SRC;
+    v.crossOrigin = "anonymous";
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute("webkit-playsinline", "true");
+    v.playbackRate = PLAYBACK_RATE;
+    v.style.display = "none";
+    document.body.appendChild(v);
+
+    v.addEventListener("loadedmetadata", () => resolve(v), { once: true });
+    v.addEventListener("error", () => reject(new Error("影片載入失敗: " + VIDEO_SRC)), { once: true });
+    v.load();
+  });
+}
+
+function makeAlphaVideoMaterial(videoTexture) {
+  return new THREE.ShaderMaterial({
+    uniforms: { map: { value: videoTexture } },
+    transparent: true,
+    side: THREE.DoubleSide,
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      varying vec2 vUv;
+      void main() {
+        // 左半是顏色畫面，右半是灰階alpha遮罩
+        vec2 colorUv = vec2(vUv.x * 0.5, vUv.y);
+        vec2 alphaUv = vec2(vUv.x * 0.5 + 0.5, vUv.y);
+        vec3 color = texture2D(map, colorUv).rgb;
+        float alpha = texture2D(map, alphaUv).r;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `
+  });
+}
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  document.getElementById("hint").style.display = "block";
+  setStatus("初始化 MindAR...");
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: "./santa-checkpoint-targets.mind",
+    filterMinCF: 0.00005,
+    filterBeta: 0.0005,
+    uiScanning: false,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setClearColor(0x000000, 0);
+
+  setStatus("載入聖誕老人效果影片素材...");
+  santaVideo = await createVideoElement();
+
+  const videoTexture = new THREE.VideoTexture(santaVideo);
+  videoTexture.minFilter = THREE.LinearFilter;
+  videoTexture.magFilter = THREE.LinearFilter;
+
+  const material = makeAlphaVideoMaterial(videoTexture);
+
+  const h = BASE_HEIGHT;
+  const w = h * VIDEO_ASPECT;
+  const geometry = new THREE.PlaneGeometry(w, h);
+  santaMesh = new THREE.Mesh(geometry, material);
+  santaMesh.visible = false;
+  applyCalibration();
+
+  const anchor = mindarThree.addAnchor(0);
+  anchor.group.add(santaMesh);
+  anchorRef = anchor;
+
+  anchor.onTargetFound = () => {
+    document.getElementById("hint").style.display = "none";
+    setStatus("已偵測到目標，播放聖誕老人效果");
+    santaMesh.visible = true;
+    santaVideo.currentTime = 0;
+    santaVideo.playbackRate = PLAYBACK_RATE;
+    santaVideo.play().catch((err) => showErr("[video.play失敗] " + err.message));
+  };
+  anchor.onTargetLost = () => {
+    document.getElementById("hint").style.display = "block";
+    setStatus("鏡頭運作中，掃描目標中...");
+    santaMesh.visible = false;
+    santaVideo.pause();
+  };
+
+  try {
+    await mindarThree.start();
+    setStatus("鏡頭運作中，掃描目標中...");
+    forceFullscreenFix();
+    setTimeout(forceFullscreenFix, 300);
+    setTimeout(forceFullscreenFix, 1000);
+    window.addEventListener("resize", forceFullscreenFix);
+    window.addEventListener("orientationchange", forceFullscreenFix);
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    setStatus("啟動失敗");
+    document.getElementById("startBtn").style.display = "block";
+    document.getElementById("hint").style.display = "none";
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+  });
+}
+
+// ---- 現場校正面板事件 ----
+document.getElementById("sizeUp").addEventListener("click", () => {
+  sizeMultiplier *= SIZE_STEP;
+  applyCalibration();
+});
+document.getElementById("sizeDown").addEventListener("click", () => {
+  sizeMultiplier /= SIZE_STEP;
+  applyCalibration();
+});
+document.getElementById("posUp").addEventListener("click", () => {
+  yOffset += POS_STEP;
+  applyCalibration();
+});
+document.getElementById("posDown").addEventListener("click", () => {
+  yOffset -= POS_STEP;
+  applyCalibration();
+});
+document.getElementById("zUp").addEventListener("click", () => {
+  zOffset += Z_STEP;
+  applyCalibration();
+});
+document.getElementById("zDown").addEventListener("click", () => {
+  zOffset -= Z_STEP;
+  applyCalibration();
+});
+document.getElementById("xUp").addEventListener("click", () => {
+  xOffset += X_STEP;
+  applyCalibration();
+});
+document.getElementById("xDown").addEventListener("click", () => {
+  xOffset -= X_STEP;
+  applyCalibration();
+});
+
+// 測試按鈕：不用掃描書封，直接把聖誕老人放到鏡頭前方看，方便現場調整尺寸/高度/深度/左右
+document.getElementById("testBtn").addEventListener("click", () => {
+  if (!santaMesh) {
+    showErr("[測試按鈕] AR 尚未啟動，請先點「點擊開始 AR 導覽」");
+    return;
+  }
+  santaMesh.visible = !santaMesh.visible;
+  isTestMode = santaMesh.visible;
+  if (santaMesh.visible) {
+    if (anchorRef) anchorRef.group.visible = true;
+    applyZPosition();
+    santaVideo.currentTime = 0;
+    santaVideo.playbackRate = PLAYBACK_RATE;
+    santaVideo.play().catch((err) => showErr("[測試play失敗] " + err.message));
+    setStatus("測試模式: 效果顯示中，可用尺寸/高度/深度/左右按鈕調整");
+  } else {
+    applyZPosition();
+    santaVideo.pause();
+    setStatus("測試模式: 已隱藏效果");
+  }
+});
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+updateCalibLabels();
+</script>
+
+</body>
+</html>
