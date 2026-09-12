@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>兒童室尋寶 AR 總覽 v3</title>
+<style>
+  html, body {
+    margin: 0; padding: 0; width: 100%; height: 100%;
+    overflow: hidden; background: #000; font-family: sans-serif;
+  }
+  #startBtn {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    z-index: 20; padding: 18px 36px; font-size: 20px; font-weight: bold;
+    background: #ff2d78; color: #fff; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.4); cursor: pointer;
+  }
+  #statusBox {
+    position: fixed; top: 8px; left: 8px; z-index: 998;
+    color: #0f0; background: rgba(0,0,0,0.6); padding: 6px 10px;
+    border-radius: 8px; font-size: 12px; font-family: monospace;
+    max-width: 70vw;
+  }
+  #errBox {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 999;
+    background: rgba(255,0,0,0.85); color: #fff; font-size: 12px;
+    padding: 8px; display: none; white-space: pre-wrap; word-break: break-all;
+  }
+  video:not(.assetVideo) {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    object-fit: cover; z-index: 1 !important;
+  }
+  canvas {
+    position: fixed !important; top: 0; left: 0;
+    width: 100% !important; height: 100% !important;
+    z-index: 2 !important;
+  }
+
+  /* ---- 鑰匙孔專用：播完一輪後的閃光 + 任務說明彈窗 ---- */
+  #flashOverlay {
+    position: fixed; inset: 0; background: #fff; opacity: 0;
+    z-index: 50; pointer-events: none; transition: opacity 0.12s ease-out;
+  }
+  #introOverlay {
+    position: fixed; inset: 0; z-index: 45;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 22px;
+    background: #1f1710; opacity: 0; pointer-events: none;
+    transition: opacity 1.4s ease;
+  }
+  #introOverlay.show { opacity: 1; pointer-events: auto; }
+  #introVideo {
+    max-width: 86vw; max-height: 68vh; border-radius: 12px;
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  }
+  #enterQuestBtn {
+    padding: 16px 40px; font-size: 20px; font-weight: bold;
+    background: #f2c14e; color: #3a2a10; border: none; border-radius: 30px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.5); cursor: pointer;
+    opacity: 0; transition: opacity 0.6s ease;
+  }
+  #enterQuestBtn.show { opacity: 1; }
+</style>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+
+<button id="startBtn">點擊開始 AR 尋寶</button>
+<div id="statusBox">狀態: 尚未啟動</div>
+<div id="errBox"></div>
+
+<div id="flashOverlay"></div>
+<div id="introOverlay">
+  <video id="introVideo" class="assetVideo" src="./childrens-room-keyhole-quest-intro.mp4" muted playsinline webkit-playsinline="true"></video>
+  <button id="enterQuestBtn">🔑 進入尋寶</button>
+</div>
+
+<script>
+  function showErr(msg) {
+    var box = document.getElementById("errBox");
+    box.style.display = "block";
+    box.textContent = "錯誤: " + msg;
+  }
+  window.addEventListener("error", function (e) {
+    showErr(e.message + " (" + e.filename + ":" + e.lineno + ")");
+  });
+  window.addEventListener("unhandledrejection", function (e) {
+    var reason = e.reason;
+    var msg = (reason && (reason.message || reason.toString())) || String(reason);
+    showErr("[非同步] " + msg);
+  });
+</script>
+
+<script type="module">
+import * as THREE from "three";
+import { MindARThree } from "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-three.prod.js";
+
+// ⚠️ 這支合併後的target檔，需要你把4個關卡的target圖片一起丟進MindAR compiler重新編譯
+// (https://hiukim.github.io/mind-ar-js-doc/tools/compile/)，並依照下面的順序上傳，
+// 才會對應到下面 ANCHOR_INDEX 裡各關卡指定的編號：
+//   index 0 = 兒童室鑰匙孔入口
+//   index 1 = 3類麋鹿
+//   index 2 = 5類雪人
+//   index 3 = 9類聖誕老人
+//   index 4 = 館藏特色說明(逐行文字)
+// 編譯好之後，把產生的 .mind 檔案傳給我，檔名如果不是 combined-targets.mind，
+// 記得跟我說一聲，或是你自己把檔名改成這個也可以。
+const TARGETS_SRC = "./combined-targets.mind";
+const ANCHOR_INDEX = { keyhole: 0, reindeer: 1, snowman: 2, santa: 3, collectionHighlights: 4 };
+
+let mindarThree = null;
+let started = false;
+
+function setStatus(msg) {
+  const box = document.getElementById("statusBox");
+  if (box) box.textContent = "狀態: " + msg;
+}
+
+function hideHint() { /* 提示文字已移除，保留這個空函式避免其他呼叫處報錯 */ }
+function showHint() { /* 提示文字已移除，保留這個空函式避免其他呼叫處報錯 */ }
+
+// 建立video元素，並等metadata真的載好才resolve，避免尺寸為0的問題
+function createVideoElement(src, playbackRate = 1.0) {
+  return new Promise((resolve, reject) => {
+    const v = document.createElement("video");
+    v.className = "assetVideo";
+    v.src = src;
+    v.crossOrigin = "anonymous";
+    v.loop = true;
+    v.muted = true;
+    v.playsInline = true;
+    v.setAttribute("webkit-playsinline", "true");
+    v.playbackRate = playbackRate;
+    v.style.display = "none";
+    document.body.appendChild(v);
+
+    v.addEventListener("loadedmetadata", () => resolve(v), { once: true });
+    v.addEventListener("error", () => reject(new Error("影片載入失敗: " + src)), { once: true });
+    v.load();
+  });
+}
+
+// 左右拼接alpha影片的共用shader材質(左半=顏色，右半=灰階透明度遮罩)
+function makeAlphaVideoMaterial(videoTexture, opacity = 1.0) {
+  return new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: videoTexture },
+      opacity: { value: opacity },
+    },
+    transparent: true,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    vertexShader: `
+      varying vec2 vUv;
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform sampler2D map;
+      uniform float opacity;
+      varying vec2 vUv;
+      void main() {
+        vec2 colorUv = vec2(vUv.x * 0.5, vUv.y);
+        vec2 alphaUv = vec2(vUv.x * 0.5 + 0.5, vUv.y);
+        vec3 color = texture2D(map, colorUv).rgb;
+        float alpha = texture2D(map, alphaUv).r * opacity;
+        gl_FragColor = vec4(color, alpha);
+      }
+    `
+  });
+}
+
+// ============ 3類麋鹿 / 5類雪人 / 9類聖誕老人：共用的「單層影片」關卡 ============
+async function buildSimpleCheckpoint(cfg) {
+  // cfg: { name, videoSrc, aspect, baseHeight, size, y, z, x, playbackRate }
+  const video = await createVideoElement(cfg.videoSrc, cfg.playbackRate || 1.0);
+  const tex = new THREE.VideoTexture(video);
+  tex.minFilter = THREE.LinearFilter;
+  tex.magFilter = THREE.LinearFilter;
+
+  const material = makeAlphaVideoMaterial(tex, 1.0);
+  const h = cfg.baseHeight;
+  const w = h * cfg.aspect;
+  const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), material);
+
+  mesh.scale.setScalar(cfg.size);
+  mesh.position.set(cfg.x, cfg.y, cfg.z);
+  mesh.visible = false;
+
+  return { name: cfg.name, mesh, video };
+}
+
+// ============ 兒童室鑰匙孔：單層(鑰匙孔+文字) + 3層煙火 + 任務說明彈窗 ============
+const KEYHOLE_SINGLE_SRC = "./childrens-room-keyhole-single-effect.mp4";
+const KEYHOLE_FIREWORKS_SRC = "./childrens-room-keyhole-fireworks-effect.mp4";
+const KEYHOLE_ASPECT = 1190 / 1682;
+const KEYHOLE_BASE_HEIGHT = 1.6;
+const KEYHOLE_CALIB = { size: 0.66, y: 0.08, z: 0.00, x: 0.00 };
+
+const FIREWORK_LAYERS = [
+  { name: "後層", zOffset: -0.35, scaleMul: 0.80, opacity: 0.45, timeOffsetRatio: 0.0 },
+  { name: "中層", zOffset: -0.05, scaleMul: 1.00, opacity: 0.85, timeOffsetRatio: 0.33 },
+  { name: "前層", zOffset: 0.30,  scaleMul: 1.20, opacity: 1.00, timeOffsetRatio: 0.66 },
+];
+const REFERENCE_LAYER_INDEX = 1;
+const FADE_OUT_MS = 1500;
+const INTRO_DELAY_FALLBACK_S = 5.5;
+
+let keyholeParentGroup, keyholeSingleMesh, keyholeSingleVideo;
+let keyholeLayerRefs = [];
+let introTimer = null;
+let introShownThisSession = false;
+
+async function buildKeyholeCheckpoint() {
+  keyholeParentGroup = new THREE.Group();
+
+  keyholeSingleVideo = await createVideoElement(KEYHOLE_SINGLE_SRC);
+  const singleTex = new THREE.VideoTexture(keyholeSingleVideo);
+  singleTex.minFilter = THREE.LinearFilter;
+  singleTex.magFilter = THREE.LinearFilter;
+  keyholeSingleMesh = new THREE.Mesh(
+    new THREE.PlaneGeometry(KEYHOLE_BASE_HEIGHT * KEYHOLE_ASPECT, KEYHOLE_BASE_HEIGHT),
+    makeAlphaVideoMaterial(singleTex, 1.0)
+  );
+  keyholeSingleMesh.position.z = 0;
+  keyholeParentGroup.add(keyholeSingleMesh);
+
+  const fireworksGroup = new THREE.Group();
+  const videos = await Promise.all(FIREWORK_LAYERS.map(() => createVideoElement(KEYHOLE_FIREWORKS_SRC)));
+  FIREWORK_LAYERS.forEach((layer, i) => {
+    const v = videos[i];
+    const tex = new THREE.VideoTexture(v);
+    tex.minFilter = THREE.LinearFilter;
+    tex.magFilter = THREE.LinearFilter;
+    const h = KEYHOLE_BASE_HEIGHT * layer.scaleMul;
+    const w = h * KEYHOLE_ASPECT;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), makeAlphaVideoMaterial(tex, layer.opacity));
+    mesh.position.z = layer.zOffset;
+    fireworksGroup.add(mesh);
+    keyholeLayerRefs.push({ video: v, mesh, layer });
+  });
+  keyholeParentGroup.add(fireworksGroup);
+
+  keyholeParentGroup.scale.setScalar(KEYHOLE_CALIB.size);
+  keyholeParentGroup.position.set(KEYHOLE_CALIB.x, KEYHOLE_CALIB.y, KEYHOLE_CALIB.z);
+  keyholeParentGroup.visible = false;
+
+  return keyholeParentGroup;
+}
+
+function playKeyhole() {
+  keyholeSingleVideo.currentTime = 0;
+  keyholeSingleVideo.play().catch((err) => showErr("[鑰匙孔單層play失敗] " + err.message));
+  keyholeLayerRefs.forEach(({ video, layer }) => {
+    const dur = video.duration || INTRO_DELAY_FALLBACK_S;
+    video.currentTime = (layer.timeOffsetRatio * dur) % dur;
+    video.play().catch((err) => showErr("[煙火play失敗:" + layer.name + "] " + err.message));
+  });
+}
+function pauseKeyhole() {
+  keyholeSingleVideo.pause();
+  keyholeLayerRefs.forEach(({ video }) => video.pause());
+}
+
+function triggerIntroSequence() {
+  if (introShownThisSession) return;
+  introShownThisSession = true;
+
+  const flash = document.getElementById("flashOverlay");
+  const intro = document.getElementById("introOverlay");
+  const introVideo = document.getElementById("introVideo");
+  const enterBtn = document.getElementById("enterQuestBtn");
+
+  flash.style.opacity = "1";
+  setTimeout(() => {
+    flash.style.opacity = "0";
+    intro.classList.add("show");
+    introVideo.currentTime = 0;
+    introVideo.play().catch((err) => showErr("[任務說明影片播放失敗] " + err.message));
+    enterBtn.classList.remove("show");
+    const dur = (introVideo.duration || 5) * 1000;
+    setTimeout(() => enterBtn.classList.add("show"), dur);
+  }, 130);
+}
+
+function scheduleIntroAfterOneLoop() {
+  introShownThisSession = false;
+  if (introTimer) clearTimeout(introTimer);
+  const refVideo = keyholeLayerRefs[REFERENCE_LAYER_INDEX].video;
+  const dur = refVideo.duration || INTRO_DELAY_FALLBACK_S;
+  introTimer = setTimeout(triggerIntroSequence, dur * 1000);
+}
+function cancelScheduledIntro() {
+  if (introTimer) { clearTimeout(introTimer); introTimer = null; }
+}
+
+function fadeOutKeyhole(durationMs, onDone) {
+  const startOpacities = keyholeLayerRefs.map((r) => r.mesh.material.uniforms.opacity.value);
+  const singleStart = keyholeSingleMesh.material.uniforms.opacity.value;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / durationMs, 1);
+    keyholeLayerRefs.forEach((r, i) => { r.mesh.material.uniforms.opacity.value = startOpacities[i] * (1 - t); });
+    keyholeSingleMesh.material.uniforms.opacity.value = singleStart * (1 - t);
+    if (t < 1) {
+      requestAnimationFrame(step);
+    } else {
+      pauseKeyhole();
+      keyholeParentGroup.visible = false;
+      keyholeLayerRefs.forEach((r, i) => { r.mesh.material.uniforms.opacity.value = startOpacities[i]; });
+      keyholeSingleMesh.material.uniforms.opacity.value = singleStart;
+      if (onDone) onDone();
+    }
+  }
+  requestAnimationFrame(step);
+}
+
+document.getElementById("enterQuestBtn").addEventListener("click", () => {
+  const intro = document.getElementById("introOverlay");
+  const enterBtn = document.getElementById("enterQuestBtn");
+  enterBtn.classList.remove("show");
+  intro.classList.remove("show");
+  if (keyholeParentGroup && keyholeParentGroup.visible) {
+    fadeOutKeyhole(FADE_OUT_MS);
+  }
+  setTimeout(() => {
+    document.getElementById("introVideo").pause();
+    setStatus("鏡頭運作中，掃描目標中...");
+  }, 1500);
+});
+document.getElementById("introOverlay").addEventListener("click", () => {
+  document.getElementById("introOverlay").classList.remove("show");
+});
+
+// 強制修正MindAR產生的攝影機畫面/畫布，避免任何外層容器造成的黑邊
+function forceFullscreenFix() {
+  function apply(el) {
+    el.style.setProperty("position", "fixed", "important");
+    el.style.setProperty("top", "0", "important");
+    el.style.setProperty("left", "0", "important");
+    el.style.setProperty("width", "100vw", "important");
+    el.style.setProperty("height", "100vh", "important");
+    el.style.setProperty("max-width", "none", "important");
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("transform", "none", "important");
+    el.style.setProperty("object-fit", "cover", "important");
+  }
+  const v = document.querySelector("video:not(.assetVideo)");
+  const canvas = document.querySelector("canvas");
+  [v, canvas].forEach((el) => {
+    if (!el) return;
+    apply(el);
+    let node = el.parentElement;
+    while (node && node !== document.body) {
+      node.style.setProperty("transform", "none", "important");
+      node.style.setProperty("position", "static", "important");
+      node.style.setProperty("width", "100%", "important");
+      node.style.setProperty("height", "100%", "important");
+      node.style.setProperty("max-width", "none", "important");
+      node = node.parentElement;
+    }
+  });
+}
+
+// ============ 館藏特色說明：6行文字依序滑入(沿用 wayfinding-station4-v9 的做法) ============
+const CH_LINES = [
+  { file: "./wayfinding-station4-msg1.png", pixelWidth: 1089 },
+  { file: "./wayfinding-station4-msg2.png", pixelWidth: 1081 },
+  { file: "./wayfinding-station4-msg3.png", pixelWidth: 611 },
+  { file: "./wayfinding-station4-msg4.png", pixelWidth: 965 },
+  { file: "./wayfinding-station4-msg5.png", pixelWidth: 1702 },
+  { file: "./wayfinding-station4-msg6.png", pixelWidth: 1045 },
+];
+const CH_LINE_PIXEL_HEIGHT = 105;
+const CH_REVEAL_INTERVAL_MS = 1200;
+const CH_ANIM_DURATION_MS = 500;
+const CH_SLIDE_DISTANCE = 0.25;
+const CH_PAUSE_AFTER_COMPLETE_MS = 3000;
+const CH_TOP_Y = 0.45;
+const CH_WORLD_LINE_HEIGHT = 0.08;
+const CH_LINE_GAP = 0.025;
+
+function easeOutQuad(t) {
+  return 1 - (1 - t) * (1 - t);
+}
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+function animateLine(item, duration) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    function step(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = easeOutQuad(t);
+      item.mesh.position.y = item.fromY + (item.toY - item.fromY) * eased;
+      item.material.opacity = eased;
+      if (t < 1) {
+        requestAnimationFrame(step);
+      } else {
+        resolve();
+      }
+    }
+    requestAnimationFrame(step);
+  });
+}
+function resetLine(item) {
+  item.mesh.position.y = item.fromY;
+  item.material.opacity = 0;
+}
+
+async function buildCollectionHighlights() {
+  const group = new THREE.Group();
+  const textureLoader = new THREE.TextureLoader();
+  const textures = await Promise.all(CH_LINES.map((l) => textureLoader.loadAsync(l.file)));
+  textures.forEach((t) => (t.colorSpace = THREE.SRGBColorSpace));
+
+  const lineMeshes = CH_LINES.map((lineInfo, i) => {
+    const aspect = lineInfo.pixelWidth / CH_LINE_PIXEL_HEIGHT;
+    const w = CH_WORLD_LINE_HEIGHT * aspect;
+    const h = CH_WORLD_LINE_HEIGHT;
+    const finalY = CH_TOP_Y - i * (CH_WORLD_LINE_HEIGHT + CH_LINE_GAP) - CH_WORLD_LINE_HEIGHT / 2;
+
+    const geometry = new THREE.PlaneGeometry(w, h);
+    const material = new THREE.MeshBasicMaterial({
+      map: textures[i],
+      transparent: true,
+      opacity: 0,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(0, finalY - CH_SLIDE_DISTANCE, 0);
+    group.add(mesh);
+
+    return { mesh, material, fromY: finalY - CH_SLIDE_DISTANCE, toY: finalY };
+  });
+
+  let sequenceRunning = false;
+  async function playSequence() {
+    if (sequenceRunning) return;
+    sequenceRunning = true;
+    while (true) {
+      lineMeshes.forEach(resetLine);
+      for (const item of lineMeshes) {
+        await animateLine(item, CH_ANIM_DURATION_MS);
+        await sleep(Math.max(0, CH_REVEAL_INTERVAL_MS - CH_ANIM_DURATION_MS));
+      }
+      await sleep(CH_PAUSE_AFTER_COMPLETE_MS);
+    }
+  }
+
+  return { group, playSequence };
+}
+
+async function startAR() {
+  if (started) return;
+  started = true;
+
+  document.getElementById("startBtn").style.display = "none";
+  showHint();
+  setStatus("初始化 MindAR...");
+
+  mindarThree = new MindARThree({
+    container: document.body,
+    imageTargetSrc: TARGETS_SRC,
+    filterMinCF: 0.00005,
+    filterBeta: 0.0005,
+    uiScanning: false,
+    maxTrack: 1,
+  });
+
+  const { renderer, scene, camera } = mindarThree;
+  renderer.setClearColor(0x000000, 0);
+
+  setStatus("載入 4 個關卡的影片素材中...(第一次載入可能要等一下)");
+
+  // ---- 建立4個關卡的內容 ----
+  const keyholeGroup = await buildKeyholeCheckpoint();
+
+  const reindeer = await buildSimpleCheckpoint({
+    name: "麋鹿",
+    videoSrc: "./reindeer-checkpoint-effect-v2.mp4",
+    aspect: 1190 / 1682,
+    baseHeight: 1.2,
+    size: 0.66, y: 0.12, z: -0.69, x: 0.00,
+  });
+
+  const snowman = await buildSimpleCheckpoint({
+    name: "雪人",
+    videoSrc: "./snowman-checkpoint-effect.mp4",
+    aspect: 1190 / 1682,
+    baseHeight: 1.4,
+    size: 0.66, y: 0.24, z: 0.03, x: 0.15,
+  });
+
+  const santa = await buildSimpleCheckpoint({
+    name: "聖誕老人",
+    videoSrc: "./santa-checkpoint-effect-v3.mp4",
+    aspect: 1190 / 1682,
+    baseHeight: 1.4,
+    size: 0.57, y: 0.00, z: 0.00, x: 0.20,
+    playbackRate: 1.0,
+  });
+
+  const collectionHighlights = await buildCollectionHighlights();
+
+  // ---- 掛到各自的anchor ----
+  const anchorKeyhole = mindarThree.addAnchor(ANCHOR_INDEX.keyhole);
+  anchorKeyhole.group.add(keyholeGroup);
+  anchorKeyhole.onTargetFound = () => {
+    hideHint();
+    setStatus("已偵測到目標：鑰匙孔，播放鑰匙孔+煙火效果");
+    keyholeGroup.visible = true;
+    playKeyhole();
+    scheduleIntroAfterOneLoop();
+  };
+  anchorKeyhole.onTargetLost = () => {
+    showHint();
+    setStatus("鏡頭運作中，掃描目標中...");
+    keyholeGroup.visible = false;
+    pauseKeyhole();
+    cancelScheduledIntro();
+  };
+
+  const anchorReindeer = mindarThree.addAnchor(ANCHOR_INDEX.reindeer);
+  anchorReindeer.group.add(reindeer.mesh);
+  anchorReindeer.onTargetFound = () => {
+    hideHint();
+    setStatus("已偵測到目標：麋鹿，播放麋鹿對話框效果");
+    reindeer.mesh.visible = true;
+    reindeer.video.currentTime = 0;
+    reindeer.video.play().catch((err) => showErr("[麋鹿play失敗] " + err.message));
+  };
+  anchorReindeer.onTargetLost = () => {
+    showHint();
+    setStatus("鏡頭運作中，掃描目標中...");
+    reindeer.mesh.visible = false;
+    reindeer.video.pause();
+  };
+
+  const anchorSnowman = mindarThree.addAnchor(ANCHOR_INDEX.snowman);
+  anchorSnowman.group.add(snowman.mesh);
+  anchorSnowman.onTargetFound = () => {
+    hideHint();
+    setStatus("已偵測到目標：雪人，播放雪人效果");
+    snowman.mesh.visible = true;
+    snowman.video.currentTime = 0;
+    snowman.video.play().catch((err) => showErr("[雪人play失敗] " + err.message));
+  };
+  anchorSnowman.onTargetLost = () => {
+    showHint();
+    setStatus("鏡頭運作中，掃描目標中...");
+    snowman.mesh.visible = false;
+    snowman.video.pause();
+  };
+
+  const anchorSanta = mindarThree.addAnchor(ANCHOR_INDEX.santa);
+  anchorSanta.group.add(santa.mesh);
+  anchorSanta.onTargetFound = () => {
+    hideHint();
+    setStatus("已偵測到目標：聖誕老人，播放聖誕老人效果");
+    santa.mesh.visible = true;
+    santa.video.currentTime = 0;
+    santa.video.play().catch((err) => showErr("[聖誕老人play失敗] " + err.message));
+  };
+  anchorSanta.onTargetLost = () => {
+    showHint();
+    setStatus("鏡頭運作中，掃描目標中...");
+    santa.mesh.visible = false;
+    santa.video.pause();
+  };
+
+  const anchorCollectionHighlights = mindarThree.addAnchor(ANCHOR_INDEX.collectionHighlights);
+  anchorCollectionHighlights.group.add(collectionHighlights.group);
+  anchorCollectionHighlights.onTargetFound = () => {
+    hideHint();
+    setStatus("已偵測到目標：館藏特色，逐行顯示中");
+    collectionHighlights.playSequence();
+  };
+  anchorCollectionHighlights.onTargetLost = () => {
+    showHint();
+    setStatus("鏡頭運作中，掃描目標中...");
+  };
+
+  try {
+    await mindarThree.start();
+    setStatus("鏡頭運作中，掃描目標中...");
+    forceFullscreenFix();
+    setTimeout(forceFullscreenFix, 300);
+    setTimeout(forceFullscreenFix, 1000);
+    window.addEventListener("resize", forceFullscreenFix);
+    window.addEventListener("orientationchange", forceFullscreenFix);
+  } catch (err) {
+    showErr("[MindAR啟動失敗] " + (err && (err.message || err.toString())));
+    setStatus("啟動失敗");
+    document.getElementById("startBtn").style.display = "block";
+    showHint();
+    started = false;
+    return;
+  }
+
+  renderer.setAnimationLoop(() => {
+    renderer.render(scene, camera);
+  });
+}
+
+document.getElementById("startBtn").addEventListener("click", startAR);
+</script>
+
+</body>
+</html>
